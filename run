@@ -1,0 +1,24 @@
+#!/bin/bash
+
+ROOT="$(dirname "$0")"
+
+_cargo() {
+    cargo $1 --manifest-path "$ROOT/server/Cargo.toml" "${@:2}"
+}
+
+serve() {
+    _cargo "$ROOT/client" 3333
+}
+
+test() {
+    _cargo test
+}
+
+func="$1"
+if [ "$func" == "" ]; then
+    echo "Usage: run <operation>"
+elif [ "$(type -t "$func")" == "function" ]; then
+    $func
+else
+    >&2 echo "\"$func\" is not a supported operation."
+fi
