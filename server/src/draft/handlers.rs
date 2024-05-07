@@ -1,8 +1,6 @@
-use crate::{
-    cards::CardDatabase,
-    draft::{DraftConfig, DraftList, DraftLobby},
-    Resp,
-};
+use crate::{cards::CardDatabase, draft::DraftConfig, Resp};
+
+use super::packs::DraftPool;
 
 pub async fn handle_launch_request(
     carddb: std::sync::Arc<CardDatabase>,
@@ -86,7 +84,7 @@ pub async fn handle_launch_request(
         return Resp::e422("No card list provided for draft.");
     };
 
-    let mut db = DraftList::new();
+    let mut pool = DraftPool::new();
     for line in list.lines() {
         let key = &line.trim().to_lowercase();
         if key.is_empty() {
@@ -97,15 +95,8 @@ pub async fn handle_launch_request(
             return Resp::e422(format!("Card not found in custom list or database: {line}"));
         };
 
-        db.add(card);
+        pool.add(card);
     }
-
-    let lobby = DraftLobby {
-        database: db,
-        config,
-    };
-
-    dbg!(lobby);
 
     Resp::ok("ok!")
 }
