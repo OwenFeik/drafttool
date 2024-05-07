@@ -1,41 +1,9 @@
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use bytes::Buf;
 use serde::de::DeserializeOwned;
 
-pub enum Rarity {
-    Mythic,
-    Rare,
-    Uncommon,
-    Common,
-    Special,
-    Bonus,
-}
-
-pub struct Card {
-    name: String,
-    image: String,
-    set: String,
-    pub rarity: Rarity,
-    text: String,
-}
-
-impl Card {
-    pub fn new(name: String, image: String, set: String, text: String, rarity: Rarity) -> Self {
-        Self {
-            name,
-            image,
-            set,
-            rarity,
-            text,
-        }
-    }
-}
-
-struct CardDatabase {
-    sets: HashMap<String, Vec<Card>>,
-    name_to_set: HashMap<String, Vec<String>>,
-}
+use crate::cards::{Card, Rarity};
 
 async fn get_bytes(uri: &str) -> Result<bytes::Bytes, String> {
     reqwest::get(uri)
@@ -53,12 +21,12 @@ fn decode_json<T: DeserializeOwned>(bytes: bytes::Bytes) -> Result<T, String> {
 async fn download_list(path: &Path) -> Result<(), String> {
     #[derive(serde::Deserialize)]
     struct BulkDataInfo {
-        uri: String,
+        download_uri: String,
     }
 
     let info: BulkDataInfo =
         decode_json(get_bytes("https://api.scryfall.com/bulk-data/oracle-cards").await?)?;
-    let raw = get_bytes(&info.uri).await?;
+    let raw = get_bytes(&info.download_uri).await?;
 
     tokio::fs::write(path, raw)
         .await
@@ -66,7 +34,7 @@ async fn download_list(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 struct ScryfallCardImages {
     png: Option<String>,
     border_crop: Option<String>,
@@ -94,7 +62,7 @@ impl ScryfallCardImages {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 struct ScryfallCard {
     /// Card name. Includes both faces (!).
     name: String,
@@ -103,13 +71,13 @@ struct ScryfallCard {
     set: String,
 
     /// Object containing image URIs.
-    image_uris: ScryfallCardImages,
+    image_uris: Option<ScryfallCardImages>,
 
     /// Rarity string, mythic, rare, uncommon, common, special, bonus.
     rarity: String,
 
     /// Oracle text for the card.
-    text: Option<String>,
+    oracle_text: Option<String>,
 }
 
 impl ScryfallCard {
@@ -130,25 +98,36 @@ impl ScryfallCard {
             _ => return None,
         };
 
-        Some(Card {
+        Some(Card::new(
             name,
-            set: self.set,
-            image: self.image_uris.choose()?,
+            self.image_uris?.choose()?,
+            self.set,
+            self.oracle_text?,
             rarity,
-            text: self.text?
-        })
+        ))
     }
 }
 
-async fn load_cards(data: &Path) -> Result<CardDatabase, String> {
+pub async fn load_cards(data: &Path) -> Result<Vec<Card>, String> {
+    tracing::debug!("Loading scryfall card data.");
+
+    tokio::fs::create_dir_all(data)
+        .await
+        .map_err(|e| e.to_string())?;
     let file = data.join("scryfall-cards.json");
 
     if !file.exists() {
+        tracing::debug!("File not found in cache, downloading to {}", file.display());
         download_list(&file).await?;
+        tracing::debug!("Successfully downloaded data.");
     }
 
     let raw = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
+    tracing::debug!("Read scryfall data from disk. Parsing JSON.");
     let cards: Vec<ScryfallCard> = decode_json(bytes::Bytes::from(raw))?;
-
-    Err("failed :(".to_string())
+    tracing::debug!("Converting parsed JSON into card structs.");
+    Ok(cards
+        .into_iter()
+        .filter_map(ScryfallCard::to_card)
+        .collect())
 }

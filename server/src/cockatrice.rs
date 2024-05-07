@@ -2,14 +2,16 @@ use std::collections::HashMap;
 
 use quick_xml::DeError;
 
-use crate::scryfall::{Card, Rarity};
+use crate::cards::{Card, Rarity};
 
+#[allow(unused)]
 #[derive(serde::Deserialize)]
 struct XmlSetInner {
     name: String,
     longname: String,
 }
 
+#[allow(unused)]
 #[derive(serde::Deserialize)]
 struct XmlSet {
     #[serde(rename = "set")]
@@ -43,6 +45,7 @@ struct XmlColourHolder {
     inner: XmlColour,
 }
 
+#[allow(unused)]
 #[derive(serde::Deserialize)]
 struct XmlCard {
     name: String,
@@ -80,6 +83,7 @@ struct XmlCardList {
     list: Vec<XmlCard>,
 }
 
+#[allow(unused)]
 #[derive(serde::Deserialize)]
 struct XmlCardDb {
     #[serde(default)]

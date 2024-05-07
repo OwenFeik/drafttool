@@ -1,18 +1,18 @@
 use std::fmt::Debug;
 
 use crate::{
+    cards::{Card, CardDatabase, Rarity},
     cockatrice::decode_xml_cards,
-    scryfall::{Card, Rarity},
 };
 
-struct CardDatabase {
+struct DraftList {
     mythics: Vec<Card>,
     rares: Vec<Card>,
     uncommons: Vec<Card>,
     commons: Vec<Card>,
 }
 
-impl CardDatabase {
+impl DraftList {
     fn new() -> Self {
         Self {
             mythics: Vec::new(),
@@ -33,7 +33,7 @@ impl CardDatabase {
     }
 }
 
-impl Debug for CardDatabase {
+impl Debug for DraftList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -75,11 +75,12 @@ impl DraftConfig {
 
 #[derive(Debug)]
 struct DraftLobby {
-    database: CardDatabase,
+    database: DraftList,
     config: DraftConfig,
 }
 
 pub async fn handle_launch_request(
+    carddb: std::sync::Arc<CardDatabase>,
     mut data: axum::extract::Multipart,
 ) -> axum::response::Response<String> {
     use super::Resp;
@@ -87,7 +88,7 @@ pub async fn handle_launch_request(
     let mut cards = None;
     let mut list = None;
     let mut config = DraftConfig::new();
-    while let Ok(Some(mut field)) = data.next_field().await {
+    while let Ok(Some(field)) = data.next_field().await {
         let field_name = field.name().unwrap_or("").to_string();
         if field_name == "card_database" {
             match field.bytes().await {
@@ -155,21 +156,22 @@ pub async fn handle_launch_request(
         ));
     }
 
-    let Some(mut cards) = cards else {
+    let Some(custom_cards) = cards else {
         return Resp::e422("No card database provided.");
     };
     let Some(list) = list else {
         return Resp::e422("No card list provided for draft.");
     };
 
-    let mut db = CardDatabase::new();
+    let mut db = DraftList::new();
     for line in list.lines() {
-        if line.trim().is_empty() {
+        let key = &line.trim().to_lowercase();
+        if key.is_empty() {
             continue;
         }
 
-        let Some(card) = cards.remove(&line.trim().to_lowercase()) else {
-            return Resp::e422(format!("Card missing from database: {line}"));
+        let Some(card) = custom_cards.get(key).or_else(|| carddb.get(key)).cloned() else {
+            return Resp::e422(format!("Card not found in custom list or database: {line}"));
         };
 
         db.add(card);

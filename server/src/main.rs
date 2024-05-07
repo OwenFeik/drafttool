@@ -1,13 +1,20 @@
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
 use axum::{
-    extract::{Multipart, WebSocketUpgrade},
+    extract::{Multipart, State, WebSocketUpgrade},
     http::{Response, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Router,
 };
+use cards::CardDatabase;
 use tokio::net::TcpListener;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
+mod cards;
 mod cockatrice;
 mod draft;
 mod scryfall;
@@ -52,8 +59,25 @@ impl Resp {
 
 async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {}
 
-async fn launch_handler(data: Multipart) -> axum::http::Response<String> {
-    draft::handle_launch_request(data).await
+async fn launch_handler(
+    State(carddb): State<Arc<CardDatabase>>,
+    data: Multipart,
+) -> axum::http::Response<String> {
+    draft::handle_launch_request(carddb, data).await
+}
+
+async fn load_card_database(data: &Path) -> Result<CardDatabase, String> {
+    let scryfall_cards = scryfall::load_cards(data).await?;
+    tracing::debug!("Inserting scryfall data to card database.");
+    let mut database = CardDatabase::new();
+    for card in scryfall_cards {
+        database.add(card);
+    }
+    tracing::debug!(
+        "Succesfully populated card database with {} cards.",
+        database.size()
+    );
+    Ok(database)
 }
 
 #[tokio::main]
@@ -67,15 +91,21 @@ async fn main() {
         .map(|s| u16::from_str_radix(&s, 10).expect(&format!("Invalid port number: {s}")))
         .expect(USAGE);
 
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
+
+    let card_db = match load_card_database(&PathBuf::from(data)).await {
+        Ok(db) => db,
+        Err(e) => panic!("Failed to load scryfall card list: {e}"),
+    };
+
     let app = Router::new()
         .fallback_service(ServeDir::new(content).append_index_html_on_directories(true))
         .route("/ws", get(ws_handler))
         .route("/api/start", post(launch_handler))
+        .with_state(Arc::new(card_db))
         .layer(TraceLayer::new_for_http());
-
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
 
     let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
