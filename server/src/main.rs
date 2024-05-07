@@ -15,9 +15,7 @@ use tokio::net::TcpListener;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
 mod cards;
-mod cockatrice;
 mod draft;
-mod scryfall;
 
 #[derive(serde::Serialize)]
 struct Resp {
@@ -63,11 +61,11 @@ async fn launch_handler(
     State(carddb): State<Arc<CardDatabase>>,
     data: Multipart,
 ) -> axum::http::Response<String> {
-    draft::handle_launch_request(carddb, data).await
+    draft::handlers::handle_launch_request(carddb, data).await
 }
 
 async fn load_card_database(data: &Path) -> Result<CardDatabase, String> {
-    let scryfall_cards = scryfall::load_cards(data).await?;
+    let scryfall_cards = cards::scryfall::load_cards(data).await?;
     tracing::debug!("Inserting scryfall data to card database.");
     let mut database = CardDatabase::new();
     for card in scryfall_cards {

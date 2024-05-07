@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+pub mod cockatrice;
+pub mod scryfall;
+
 #[derive(Clone, Debug)]
 pub enum Rarity {
     Mythic,
