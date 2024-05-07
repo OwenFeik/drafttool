@@ -7,7 +7,7 @@ _cargo() {
 }
 
 serve() {
-    _cargo "$ROOT/client" 3333
+    _cargo run "$ROOT/client" "$ROOT/server/target/data" 3333
 }
 
 test() {

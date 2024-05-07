@@ -1,0 +1,19 @@
+html {
+    font-family: sans-serif;
+}
+
+#config {
+    width: min(800px, 100%);
+    margin: auto;
+    padding: 1rem;
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem;
+}
+
+input:invalid {
+    border-color:red;
+}

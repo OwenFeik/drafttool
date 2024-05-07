@@ -2,13 +2,15 @@ use axum::{
     extract::{Multipart, WebSocketUpgrade},
     http::{Response, StatusCode},
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use tokio::net::TcpListener;
-use tower_http::services::ServeDir;
+use tower_http::{services::ServeDir, trace::TraceLayer};
 
-mod xml;
+mod cockatrice;
+mod draft;
+mod scryfall;
 
 #[derive(serde::Serialize)]
 struct Resp {
@@ -50,37 +52,30 @@ impl Resp {
 
 async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {}
 
-async fn launch_handler(mut data: Multipart) -> axum::http::Response<String> {
-    let mut list = None;
-    while let Ok(Some(mut field)) = data.next_field().await {
-        match field.name() {
-            Some("list") => match field.bytes().await {
-                Ok(bytes) => match xml::decode_xml_cards(bytes) {
-                    Ok(db) => list = Some(db),
-                    Err(e) => return Resp::e422(format!("Failed to load card list: {e}")),
-                },
-                Err(e) => return Resp::e500(e),
-            },
-            _ => {}
-        }
-    }
-
-    Resp::ok("Ok!")
+async fn launch_handler(data: Multipart) -> axum::http::Response<String> {
+    draft::handle_launch_request(data).await
 }
 
 #[tokio::main]
 async fn main() {
-    const USAGE: &str = "Usage: server <static path> <port>";
+    const USAGE: &str = "Usage: server <static path> <data path> <port>";
 
     let content = std::env::args().nth(1).expect(USAGE);
+    let data = std::env::args().nth(2).expect(USAGE);
     let port = std::env::args()
-        .nth(2)
+        .nth(3)
         .map(|s| u16::from_str_radix(&s, 10).expect(&format!("Invalid port number: {s}")))
         .expect(USAGE);
 
     let app = Router::new()
         .fallback_service(ServeDir::new(content).append_index_html_on_directories(true))
-        .route("/ws", get(ws_handler));
+        .route("/ws", get(ws_handler))
+        .route("/api/start", post(launch_handler))
+        .layer(TraceLayer::new_for_http());
+
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await

@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+
 use quick_xml::DeError;
+
+use crate::scryfall::{Card, Rarity};
 
 #[derive(serde::Deserialize)]
 struct XmlSetInner {
@@ -40,7 +44,7 @@ struct XmlColourHolder {
 }
 
 #[derive(serde::Deserialize)]
-struct XmlCardInner {
+struct XmlCard {
     name: String,
     set: XmlSetEntry,
 
@@ -53,27 +57,54 @@ struct XmlCardInner {
     #[serde(rename = "type")]
     ty: String,
 
-    pt: String,
+    pt: Option<String>,
     text: String,
 }
 
-#[derive(serde::Deserialize)]
-struct XmlCard {
-    #[serde(rename = "card")]
-    inner: XmlCardInner,
+impl XmlCard {
+    fn rarity(&self) -> Option<Rarity> {
+        let rarity_str = self.set.rarity.replace(" Rare", "");
+        match rarity_str.as_str() {
+            "Mythic" => Some(Rarity::Mythic),
+            "Rare" => Some(Rarity::Rare),
+            "Uncommon" => Some(Rarity::Uncommon),
+            "Common" => Some(Rarity::Common),
+            _ => None,
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
-pub struct XmlCardDb {
+struct XmlCardList {
+    #[serde(default, rename = "card")]
+    list: Vec<XmlCard>,
+}
+
+#[derive(serde::Deserialize)]
+struct XmlCardDb {
     #[serde(default)]
     sets: Vec<XmlSet>,
 
-    #[serde(default)]
-    cards: Vec<XmlCard>,
+    cards: XmlCardList,
 }
 
-pub fn decode_xml_cards(xml: bytes::Bytes) -> Result<XmlCardDb, DeError> {
-    quick_xml::de::from_reader(&*xml)
+/// Decode the provided cockatrice card database XML into a map from lowercased
+/// card name to card object. This ensures that all cards in the database are
+/// unique and handles name case normalisation for building the card list.
+pub fn decode_xml_cards(data: bytes::Bytes) -> Result<HashMap<String, Card>, DeError> {
+    let mut map = HashMap::new();
+    let xml: XmlCardDb = quick_xml::de::from_reader(&*data)?;
+
+    for card in xml.cards.list {
+        if let Some(rarity) = card.rarity() {
+            map.insert(
+                card.name.to_lowercase(),
+                Card::new(card.name, card.set.image, card.set.name, card.text, rarity),
+            );
+        }
+    }
+
+    Ok(map)
 }
 
 #[cfg(test)]
@@ -115,7 +146,7 @@ Pay 1 life: Regenerate Nibbles. </text>
         assert_eq!(set.name, "KR2");
         assert_eq!(set.longname, "KR2");
 
-        let card = &db.cards.first().unwrap().inner;
+        let card = &db.cards.list.first().unwrap();
         assert_eq!(card.name, "Nibbles, Corpse Companion");
         assert_eq!(card.set.rarity, "Uncommon");
         assert_eq!(card.set.image, "https://mtg.design/i/vjre15.jpg");
@@ -134,7 +165,12 @@ Pay 1 life: Regenerate Nibbles. </text>
         assert_eq!(card.manacost, "G/B");
         assert_eq!(card.cmc, 1);
         assert_eq!(card.ty, "Legendary Creature — Zombie Squirrel");
-        assert_eq!(card.pt, "0/1");
+        assert_eq!(card.pt.as_ref().unwrap(), "0/1");
         assert!(card.text.starts_with("Each other Zombie"));
+    }
+
+    #[test]
+    fn test_reject() {
+        assert!(quick_xml::de::from_str::<XmlCardDb>("<root></root>").is_err());
     }
 }
