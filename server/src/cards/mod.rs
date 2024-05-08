@@ -3,7 +3,7 @@ use std::collections::HashMap;
 pub mod cockatrice;
 pub mod scryfall;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Rarity {
     Mythic,
     Rare,
@@ -30,6 +30,20 @@ impl Card {
             set,
             rarity,
             text,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn sample(rarity: Rarity) -> Self {
+        static ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+
+        let id = ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self {
+            name: format!("Card {id}"),
+            image: format!("https://example.com/card-{id}-art.jpg"),
+            set: "TST".to_string(),
+            rarity,
+            text: format!("Text for test card {id}."),
         }
     }
 }

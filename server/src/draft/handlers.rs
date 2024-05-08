@@ -8,7 +8,7 @@ pub async fn handle_launch_request(
 ) -> axum::response::Response<String> {
     let mut cards = None;
     let mut list = None;
-    let mut config = DraftConfig::new();
+    let mut config = DraftConfig::default();
     while let Ok(Some(field)) = data.next_field().await {
         let field_name = field.name().unwrap_or("").to_string();
         if field_name == "card_database" {

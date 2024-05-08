@@ -17,8 +17,8 @@ struct DraftConfig {
     commons: u32,
 }
 
-impl DraftConfig {
-    fn new() -> Self {
+impl Default for DraftConfig {
+    fn default() -> Self {
         DraftConfig {
             packs: 3,
             cards_per_pack: 15,

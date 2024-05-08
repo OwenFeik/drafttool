@@ -17,6 +17,12 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 mod cards;
 mod draft;
 
+type Res<T> = Result<T, String>;
+
+fn err<T, S: ToString>(message: S) -> Res<T> {
+    Err(message.to_string())
+}
+
 #[derive(serde::Serialize)]
 struct Resp {
     message: String,
