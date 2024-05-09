@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,

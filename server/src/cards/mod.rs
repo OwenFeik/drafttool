@@ -33,6 +33,10 @@ impl Card {
         }
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     #[cfg(test)]
     pub fn sample(rarity: Rarity) -> Self {
         static ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);

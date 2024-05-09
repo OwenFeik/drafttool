@@ -68,7 +68,7 @@ impl XmlCard {
     fn rarity(&self) -> Option<Rarity> {
         let rarity_str = self.set.rarity.replace(" Rare", "");
         match rarity_str.as_str() {
-            "Mythic" => Some(Rarity::Mythic),
+            "Mythic" => Some(Rarity::Rare),
             "Rare" => Some(Rarity::Rare),
             "Uncommon" => Some(Rarity::Uncommon),
             "Common" => Some(Rarity::Common),

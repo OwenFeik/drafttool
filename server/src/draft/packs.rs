@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use rand::{distributions::Uniform, random, seq::SliceRandom, thread_rng, Rng};
+use rand::{seq::SliceRandom, thread_rng, Rng};
 
 use crate::{
     cards::{Card, Rarity},
@@ -74,7 +74,7 @@ impl DraftPool {
             .copied()
     }
 
-    fn take(&mut self, rarity: Rarity) -> Res<Card> {
+    fn take(&mut self, rarity: Rarity, allow_fallback: bool) -> Res<Card> {
         if self.empty() {
             return err("Insufficient cards in pool.");
         }
@@ -89,8 +89,35 @@ impl DraftPool {
 
         if let Some(card) = exact {
             Ok(card)
-        } else if let Some(fallback) = self.replacement_rarity(rarity) {
-            self.take(fallback)
+        } else if allow_fallback || rarity == Rarity::Mythic && !self.rares.is_empty() {
+            if let Some(fallback) = self.replacement_rarity(rarity) {
+                self.take(fallback, false)
+            } else {
+                err(format!("Insufficient {rarity:?}s in pool."))
+            }
+        } else {
+            err("Insufficient cards in pool.")
+        }
+    }
+
+    fn roll(&self, rarity: Rarity, allow_fallback: bool) -> Res<Card> {
+        let rng = &mut thread_rng();
+        let exact = match rarity {
+            Rarity::Mythic => self.mythics.choose(rng),
+            Rarity::Rare => self.rares.choose(rng),
+            Rarity::Uncommon => self.uncommons.choose(rng),
+            Rarity::Common => self.commons.choose(rng),
+            Rarity::Bonus | Rarity::Special => None,
+        };
+
+        if let Some(card) = exact {
+            Ok(card.clone())
+        } else if allow_fallback || rarity == Rarity::Mythic && !self.rares.is_empty() {
+            if let Some(fallback) = self.replacement_rarity(rarity) {
+                self.roll(fallback, false)
+            } else {
+                err(format!("Insufficient {rarity:?}s in pool."))
+            }
         } else {
             err("Insufficient cards in pool.")
         }
@@ -110,11 +137,9 @@ impl Debug for DraftPool {
     }
 }
 
-pub struct Pack {
-    cards: Vec<Card>,
-}
+pub type Pack = Vec<Card>;
 
-fn make_cube_packs(players: u32, config: DraftConfig, mut pool: DraftPool) -> Res<Vec<Pack>> {
+fn make_cube_packs(players: usize, config: &DraftConfig, mut pool: DraftPool) -> Res<Vec<Pack>> {
     let mut rng = thread_rng();
     pool.mythics.shuffle(&mut rng);
     pool.rares.shuffle(&mut rng);
@@ -123,36 +148,61 @@ fn make_cube_packs(players: u32, config: DraftConfig, mut pool: DraftPool) -> Re
 
     let mut packs = Vec::new();
 
-    for _ in 0..(players * config.packs) {
+    for _ in 0..(players * config.rounds) {
         let mut pack = Vec::new();
 
         for _ in 0..config.rares {
             if rng.gen_range(0.0..=1.0) < config.mythic_rate {
-                pack.push(pool.take(Rarity::Mythic)?);
+                pack.push(pool.take(Rarity::Mythic, config.allow_fallback)?);
             } else {
-                pack.push(pool.take(Rarity::Rare)?);
+                pack.push(pool.take(Rarity::Rare, config.allow_fallback)?);
             }
         }
 
         for _ in 0..config.uncommons {
-            pack.push(pool.take(Rarity::Uncommon)?);
+            pack.push(pool.take(Rarity::Uncommon, config.allow_fallback)?);
         }
 
         for _ in 0..config.commons {
-            pack.push(pool.take(Rarity::Common)?);
+            pack.push(pool.take(Rarity::Common, config.allow_fallback)?);
         }
 
-        packs.push(Pack { cards: pack })
+        packs.push(pack)
     }
 
     Ok(packs)
 }
 
-fn make_draft_packs(players: u32, config: DraftConfig, pool: DraftPool) -> Res<Vec<Pack>> {
-    Ok(Vec::new())
+fn make_draft_packs(players: usize, config: &DraftConfig, pool: DraftPool) -> Res<Vec<Pack>> {
+    let rng = &mut thread_rng();
+    let mut packs = Vec::new();
+
+    for _ in 0..(players * config.rounds) {
+        let mut pack = Vec::new();
+
+        for _ in 0..config.rares {
+            if rng.gen_range(0.0..=1.0) < config.mythic_rate {
+                pack.push(pool.roll(Rarity::Mythic, config.allow_fallback)?);
+            } else {
+                pack.push(pool.roll(Rarity::Rare, config.allow_fallback)?);
+            }
+        }
+
+        for _ in 0..config.uncommons {
+            pack.push(pool.roll(Rarity::Uncommon, config.allow_fallback)?);
+        }
+
+        for _ in 0..config.commons {
+            pack.push(pool.roll(Rarity::Common, config.allow_fallback)?);
+        }
+
+        packs.push(pack);
+    }
+
+    Ok(packs)
 }
 
-pub fn make_packs(players: u32, config: DraftConfig, pool: DraftPool) -> Res<Vec<Pack>> {
+pub fn make_packs(players: usize, config: &DraftConfig, pool: DraftPool) -> Res<Vec<Pack>> {
     if config.unique_cards {
         make_cube_packs(players, config, pool)
     } else {
@@ -169,17 +219,21 @@ mod test {
 
     use super::{make_packs, DraftPool};
 
-    #[test]
-    fn test_make_cube_packs() {
-        let config = DraftConfig {
-            packs: 2,
+    fn test_config() -> DraftConfig {
+        DraftConfig {
+            rounds: 2,
             cards_per_pack: 3,
             rares: 1,
             uncommons: 1,
             commons: 1,
             mythic_rate: 1.0,
             ..Default::default()
-        };
+        }
+    }
+
+    #[test]
+    fn test_make_cube_packs() {
+        let config = test_config();
 
         let mut pool = DraftPool::new();
         pool.add(Card::sample(Rarity::Mythic));
@@ -199,16 +253,54 @@ mod test {
         pool.add(Card::sample(Rarity::Common));
         pool.add(Card::sample(Rarity::Common));
 
-        let packs = make_packs(2, config, pool).unwrap();
+        let packs = make_packs(2, &config, pool).unwrap();
         assert!(packs.len() == 4); // 2 players, 2 packs each
-        assert!(packs.iter().all(|p| p.cards.len() == 3)); // 3 cards per pack
+        assert!(packs.iter().all(|p| p.len() == 3)); // 3 cards per pack
 
         // Each pack should contain a mythic as 100% of rares should be promoted
         // to mythics.
-        assert!(packs.iter().all(|p| p
-            .cards
+        assert!(packs
             .iter()
-            .find(|c| c.rarity == Rarity::Mythic)
-            .is_some()));
+            .all(|p| p.iter().find(|c| c.rarity == Rarity::Mythic).is_some()));
+    }
+
+    #[test]
+    fn test_make_draft_packs() {
+        let mut pool = DraftPool::new();
+        let mythic = Card::sample(Rarity::Rare);
+        pool.add(mythic.clone());
+        let uncommon = Card::sample(Rarity::Uncommon);
+        pool.add(uncommon.clone());
+        let common = Card::sample(Rarity::Common);
+        pool.add(common.clone());
+
+        let mut config = test_config();
+        config.unique_cards = false;
+
+        let packs = make_packs(2, &config, pool).unwrap();
+        assert!(packs.len() == 4); // 2 players, 2 packs each
+        assert!(packs.iter().all(|p| p.len() == 3)); // 3 cards per pack
+
+        // Each pack should have one of each card.
+        let cards = &[mythic, uncommon, common];
+        assert!(packs.iter().all(|pack| cards
+            .iter()
+            .all(|card| pack.iter().any(|pack_card| pack_card.name() == card.name()))))
+    }
+
+    #[test]
+    fn test_fail_make_packs() {
+        // 1 pack with 1 rare per player.
+        let mut config = test_config();
+        config.allow_fallback = false;
+        config.unique_cards = false; // Draft mode.
+        config.rounds = 1;
+        config.cards_per_pack = 1;
+        config.uncommons = 0;
+        config.commons = 0;
+
+        let mut pool = DraftPool::new();
+        pool.add(Card::sample(Rarity::Common));
+        assert!(make_packs(1, &config, pool).is_err());
     }
 }

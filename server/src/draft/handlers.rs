@@ -29,11 +29,11 @@ pub async fn handle_launch_request(
 
         match field_name.as_str() {
             "list" => list = Some(s),
-            "packs" => match u32::from_str_radix(&s, 10) {
-                Ok(n) => config.packs = n,
+            "packs" => match usize::from_str_radix(&s, 10) {
+                Ok(n) => config.rounds = n,
                 Err(_) => return Resp::e422(format!("Invalid pack count: {s}")),
             },
-            "cards_per_pack" => match u32::from_str_radix(&s, 10) {
+            "cards_per_pack" => match usize::from_str_radix(&s, 10) {
                 Ok(n) => config.cards_per_pack = n,
                 Err(_) => return Resp::e422(format!("Invalid number of cards per pack: {s}")),
             },
@@ -51,15 +51,15 @@ pub async fn handle_launch_request(
                 Ok(v) if v >= 0.0 && v <= 1.0 => config.mythic_rate = v,
                 _ => return Resp::e422(format!("Invalid mythic incidence: {s}")),
             },
-            "rares" => match u32::from_str_radix(&s, 10) {
+            "rares" => match usize::from_str_radix(&s, 10) {
                 Ok(n) => config.rares = n,
                 Err(_) => return Resp::e422(format!("Invalid number of rares per pack: {s}")),
             },
-            "uncommons" => match u32::from_str_radix(&s, 10) {
+            "uncommons" => match usize::from_str_radix(&s, 10) {
                 Ok(n) => config.uncommons = n,
                 Err(_) => return Resp::e422(format!("Invalid number of commons per pack: {s}")),
             },
-            "commons" => match u32::from_str_radix(&s, 10) {
+            "commons" => match usize::from_str_radix(&s, 10) {
                 Ok(n) => config.commons = n,
                 Err(_) => return Resp::e422(format!("Invalid number of commons per pack: {s}")),
             },

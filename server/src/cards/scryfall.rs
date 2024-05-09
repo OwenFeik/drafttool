@@ -89,7 +89,7 @@ impl ScryfallCard {
         };
 
         let rarity = match self.rarity.as_str() {
-            "mythic" => Rarity::Mythic,
+            "mythic" => Rarity::Rare,
             "rare" => Rarity::Rare,
             "uncommon" => Rarity::Uncommon,
             "common" => Rarity::Common,
