@@ -3,7 +3,7 @@ use std::collections::HashMap;
 pub mod cockatrice;
 pub mod scryfall;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub enum Rarity {
     Mythic,
     Rare,
@@ -13,7 +13,7 @@ pub enum Rarity {
     Bonus,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Card {
     name: String,
     image: String,

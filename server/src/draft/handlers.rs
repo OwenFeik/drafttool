@@ -1,6 +1,14 @@
-use crate::{cards::CardDatabase, draft::DraftConfig, Resp};
+use axum::extract::ws::{Message, WebSocket};
+use futures_util::{SinkExt, StreamExt};
+use uuid::Uuid;
 
-use super::packs::DraftPool;
+use crate::{
+    cards::CardDatabase,
+    draft::{server::DraftServerMessage, DraftConfig},
+    Resp,
+};
+
+use super::{packs::DraftPool, server::DraftServerRequest};
 
 pub async fn handle_launch_request(
     carddb: std::sync::Arc<CardDatabase>,
@@ -99,4 +107,70 @@ pub async fn handle_launch_request(
     }
 
     Resp::ok("ok!")
+}
+
+pub async fn handle_websocket_connection(
+    mut ws: WebSocket,
+    server: tokio::sync::mpsc::UnboundedSender<DraftServerRequest>,
+) {
+    // Test sending a ping to validate the connection.
+    if !ws
+        .send(Message::Ping("ping".as_bytes().to_owned()))
+        .await
+        .is_ok()
+    {
+        tracing::debug!("Ping on connection failed.");
+        return;
+    }
+
+    // Attempt to send channel to server to allow server to message client. If
+    // the server is already closed, abort the connection.
+    let (send, mut recv) = tokio::sync::mpsc::unbounded_channel();
+    if server
+        .send(DraftServerRequest::Connect(Uuid::new_v4(), send))
+        .is_err()
+    {
+        tracing::debug!("Attempted to join already closed draft.");
+        if let Ok(data) = serde_json::ser::to_vec(&DraftServerMessage::Ended) {
+            ws.send(Message::Binary(data)).await.ok();
+        }
+        return;
+    }
+
+    // Split the websocket. The send half will handle encoding messages from the
+    // server and forwarding them to the client, while the receive half will
+    // handle decoding messages from the client and sending them to the server.
+    let (mut ws_send, mut ws_recv) = ws.split();
+
+    let mut send_task = tokio::spawn(async move {
+        while let Some(message) = recv.recv().await {
+            match serde_json::ser::to_vec(&message) {
+                Ok(data) => {
+                    if let Err(e) = ws_send.send(Message::Binary(data)).await {
+                        tracing::debug!("Failed to send message to client: {e}");
+                        break;
+                    }
+                }
+                Err(e) => tracing::debug!("Failed to encode server message: {e}"),
+            }
+        }
+    });
+
+    let mut recv_task = tokio::spawn(async move {
+        while let Some(Ok(message)) = ws_recv.next().await {
+            match message {
+                Message::Text(_) => todo!(),
+                Message::Binary(_) => todo!(),
+                Message::Ping(_) => todo!(),
+                Message::Pong(_) => todo!(),
+                Message::Close(_) => todo!(),
+            }
+        }
+    });
+
+    // When either task completes, abort the other.
+    tokio::select! {
+        _ = (&mut send_task) => recv_task.abort(),
+        _ = (&mut recv_task) => send_task.abort(),
+    }
 }

@@ -5,6 +5,7 @@ use crate::cards::{Card, Rarity};
 mod game;
 pub mod handlers;
 mod packs;
+mod server;
 
 #[derive(Debug)]
 struct DraftConfig {
