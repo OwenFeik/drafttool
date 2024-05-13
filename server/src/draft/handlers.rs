@@ -123,11 +123,13 @@ pub async fn handle_websocket_connection(
         return;
     }
 
+    let seat = Uuid::new_v4();
+
     // Attempt to send channel to server to allow server to message client. If
     // the server is already closed, abort the connection.
     let (send, mut recv) = tokio::sync::mpsc::unbounded_channel();
     if server
-        .send(DraftServerRequest::Connect(Uuid::new_v4(), send))
+        .send(DraftServerRequest::Connect(seat, send))
         .is_err()
     {
         tracing::debug!("Attempted to join already closed draft.");
@@ -158,13 +160,24 @@ pub async fn handle_websocket_connection(
 
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(message)) = ws_recv.next().await {
-            match message {
-                Message::Text(_) => todo!(),
-                Message::Binary(_) => todo!(),
-                Message::Ping(_) => todo!(),
-                Message::Pong(_) => todo!(),
-                Message::Close(_) => todo!(),
-            }
+            let msg = match message {
+                Message::Text(text) => serde_json::de::from_str(&text),
+                Message::Binary(bytes) => serde_json::de::from_slice(&bytes),
+                Message::Ping(_) | Message::Pong(_) => continue, // not a message
+                Message::Close(_) => break,                      // client disconnected
+            };
+
+            match msg {
+                Ok(message) => {
+                    if server
+                        .send(DraftServerRequest::Message(seat, message))
+                        .is_err()
+                    {
+                        break; // server closed.
+                    }
+                }
+                Err(e) => tracing::debug!("Failed to decode client message: {e}"),
+            };
         }
     });
 
