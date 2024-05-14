@@ -1,17 +1,21 @@
+use std::sync::Arc;
+
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
     cards::CardDatabase,
     draft::{server::DraftServerMessage, DraftConfig},
-    Resp,
+    Resp, Servers,
 };
 
 use super::{packs::DraftPool, server::DraftServerRequest};
 
 pub async fn handle_launch_request(
-    carddb: std::sync::Arc<CardDatabase>,
+    carddb: Arc<CardDatabase>,
+    servers: Servers,
     mut data: axum::extract::Multipart,
 ) -> axum::response::Response<String> {
     let mut cards = None;
@@ -106,12 +110,15 @@ pub async fn handle_launch_request(
         pool.add(card);
     }
 
-    Resp::ok("ok!")
+    let id = servers.write().await.spawn(pool);
+
+    Resp::redirect(format!("/lobby/{id}"), "Draft launched.".to_string())
 }
 
 pub async fn handle_websocket_connection(
     mut ws: WebSocket,
     server: tokio::sync::mpsc::UnboundedSender<DraftServerRequest>,
+    seat: Uuid,
 ) {
     // Test sending a ping to validate the connection.
     if !ws
@@ -122,8 +129,6 @@ pub async fn handle_websocket_connection(
         tracing::debug!("Ping on connection failed.");
         return;
     }
-
-    let seat = Uuid::new_v4();
 
     // Attempt to send channel to server to allow server to message client. If
     // the server is already closed, abort the connection.

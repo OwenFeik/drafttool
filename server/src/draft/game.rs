@@ -21,8 +21,7 @@ impl PassDirection {
     }
 }
 
-struct Draft {
-    id: Uuid,
+pub struct Draft {
     players: Vec<Uuid>,
     pools: HashMap<Uuid, Vec<Card>>,
     direction: PassDirection,
@@ -37,7 +36,6 @@ impl Draft {
         debug_assert!(packs.len() == players.len() * rounds);
 
         Self {
-            id: Uuid::new_v4(),
             players,
             pools: HashMap::new(),
 
