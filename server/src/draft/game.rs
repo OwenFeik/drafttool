@@ -32,7 +32,7 @@ pub struct Draft {
 }
 
 impl Draft {
-    fn new(players: Vec<Uuid>, rounds: usize, packs: Vec<Pack>) -> Self {
+    pub fn new(players: Vec<Uuid>, rounds: usize, packs: Vec<Pack>) -> Self {
         debug_assert!(packs.len() == players.len() * rounds);
 
         Self {

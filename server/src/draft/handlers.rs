@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
     cards::CardDatabase,
-    draft::{server::DraftServerMessage, DraftConfig},
+    draft::{server::{DraftClientMessage, DraftServerMessage}, DraftConfig},
     Resp, Servers,
 };
 
@@ -110,7 +109,7 @@ pub async fn handle_launch_request(
         pool.add(card);
     }
 
-    let id = servers.write().await.spawn(pool);
+    let id = servers.write().await.spawn(config, pool);
 
     Resp::redirect(format!("/lobby/{id}"), "Draft launched.".to_string())
 }
@@ -163,6 +162,7 @@ pub async fn handle_websocket_connection(
         }
     });
 
+    let handle = server.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(message)) = ws_recv.next().await {
             let msg = match message {
@@ -174,7 +174,7 @@ pub async fn handle_websocket_connection(
 
             match msg {
                 Ok(message) => {
-                    if server
+                    if handle
                         .send(DraftServerRequest::Message(seat, message))
                         .is_err()
                     {
@@ -190,5 +190,7 @@ pub async fn handle_websocket_connection(
     tokio::select! {
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort(),
-    }
+    };
+
+    server.send(DraftServerRequest::Message(seat, DraftClientMessage::Disconnected)).ok();
 }

@@ -9,6 +9,7 @@ use crate::{
 
 use super::DraftConfig;
 
+#[derive(Clone)]
 pub struct DraftPool {
     mythics: Vec<Card>,
     rares: Vec<Card>,
