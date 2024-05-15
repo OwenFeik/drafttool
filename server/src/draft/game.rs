@@ -52,7 +52,7 @@ impl Draft {
     /// (player, pack) pairs for each player to make their pick from. This may
     /// only be called once to begin the draft. Future rounds will begin when
     /// the previous round finishes.
-    pub fn begin(&mut self) -> Vec<(Uuid, &Vec<Card>)> {
+    pub fn begin(&mut self) -> Vec<(Uuid, Vec<Card>)> {
         debug_assert!(self.current_round == 0);
 
         self.start_round()
@@ -65,7 +65,7 @@ impl Draft {
     /// the picking player if they have a new pack available to pick from and
     /// one will be produced for the player next in the draft after the picking
     /// player if the pack the picking player is passing is not empty.
-    fn handle_pick(&mut self, player: Uuid, index: usize) -> Option<Vec<(Uuid, &Vec<Card>)>> {
+    pub fn handle_pick(&mut self, player: Uuid, index: usize) -> Option<Vec<(Uuid, Vec<Card>)>> {
         let (card, pack) = self.pick_card(player, index)?;
         self.pool_for(player).push(card);
 
@@ -88,13 +88,14 @@ impl Draft {
             if let Some(next_player_stack) = self.packs_being_drafted.get(&next_player)
                 && next_player_stack.len() == 1
             {
-                newly_available_packs.push((next_player, next_player_stack.front().unwrap()));
+                newly_available_packs
+                    .push((next_player, next_player_stack.front().cloned().unwrap()));
             }
         }
         if let Some(next_pack) = self
             .packs_being_drafted
             .get(&player)
-            .and_then(|stack| stack.front())
+            .and_then(|stack| stack.front().cloned())
         {
             newly_available_packs.push((player, next_pack));
         }
@@ -111,6 +112,17 @@ impl Draft {
     /// Get the pool of cards drafted by this player, if any.
     pub fn drafted_cards(&self, player: Uuid) -> Option<&Vec<Card>> {
         self.pools.get(&player)
+    }
+
+    /// Check if this draft is completed. This is true when the final card has
+    /// been drafted from the final round.
+    pub fn draft_complete(&self) -> bool {
+        self.current_round == self.rounds && self.round_finished()
+    }
+
+    /// Map from player ID to pool of picked cards.
+    pub fn pools(&self) -> &HashMap<Uuid, Vec<Card>> {
+        &self.pools
     }
 
     /// Find the player in the draft that the given player is passing to in the
@@ -168,16 +180,10 @@ impl Draft {
             .all(|pack_stack| pack_stack.is_empty())
     }
 
-    /// Check if this draft is completed. This is true when the final card has
-    /// been drafted from the final round.
-    fn draft_complete(&self) -> bool {
-        self.current_round == self.rounds && self.round_finished()
-    }
-
     /// Begin a new round of the draft. Handles reversing the draft direction,
     /// assigning the new pack from the pool, etc. Returns a vector of pairs of
     /// player ID and new pack for that player.
-    fn start_round(&mut self) -> Vec<(Uuid, &Vec<Card>)> {
+    fn start_round(&mut self) -> Vec<(Uuid, Vec<Card>)> {
         debug_assert!(self.round_finished());
         debug_assert!(!self.draft_complete());
         debug_assert!(self.current_round < self.rounds);
@@ -197,7 +203,7 @@ impl Draft {
         // pack stack
         self.packs_being_drafted
             .iter()
-            .map(|(player, stack)| (*player, stack.front().unwrap()))
+            .map(|(player, stack)| (*player, stack.front().cloned().unwrap()))
             .collect()
     }
 
@@ -222,13 +228,10 @@ impl Draft {
 mod test {
     use uuid::Uuid;
 
-    use crate::{
-        cards::{Card, Rarity},
-        draft::{
-            game::PassDirection,
-            packs::{make_packs, DraftPool},
-            DraftConfig,
-        },
+    use crate::draft::{
+        game::PassDirection,
+        packs::{make_packs, DraftPool},
+        DraftConfig,
     };
 
     use super::Draft;
@@ -291,11 +294,7 @@ mod test {
             unique_cards: false,
             ..Default::default()
         };
-        let mut pool = DraftPool::new();
-        pool.add(Card::sample(Rarity::Mythic));
-        pool.add(Card::sample(Rarity::Rare));
-        pool.add(Card::sample(Rarity::Uncommon));
-        pool.add(Card::sample(Rarity::Common));
+        let pool = DraftPool::sample(1, 1, 1, 1);
         let packs = make_packs(players.len(), &config, pool).unwrap();
 
         let mut draft = Draft::new(players.clone(), config.rounds, packs);

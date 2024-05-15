@@ -27,6 +27,24 @@ impl DraftPool {
         }
     }
 
+    #[cfg(test)]
+    pub fn sample(mythics: usize, rares: usize, uncommons: usize, commons: usize) -> Self {
+        let mut pool = Self::new();
+        for _ in 0..mythics {
+            pool.add(Card::sample(Rarity::Mythic));
+        }
+        for _ in 0..rares {
+            pool.add(Card::sample(Rarity::Rare));
+        }
+        for _ in 0..uncommons {
+            pool.add(Card::sample(Rarity::Uncommon));
+        }
+        for _ in 0..commons {
+            pool.add(Card::sample(Rarity::Common));
+        }
+        pool
+    }
+
     pub fn add(&mut self, card: Card) {
         match card.rarity {
             Rarity::Mythic => self.mythics.push(card),
@@ -236,24 +254,7 @@ mod test {
     fn test_make_cube_packs() {
         let config = test_config();
 
-        let mut pool = DraftPool::new();
-        pool.add(Card::sample(Rarity::Mythic));
-        pool.add(Card::sample(Rarity::Mythic));
-        pool.add(Card::sample(Rarity::Mythic));
-        pool.add(Card::sample(Rarity::Mythic));
-        pool.add(Card::sample(Rarity::Rare));
-        pool.add(Card::sample(Rarity::Rare));
-        pool.add(Card::sample(Rarity::Rare));
-        pool.add(Card::sample(Rarity::Rare));
-        pool.add(Card::sample(Rarity::Uncommon));
-        pool.add(Card::sample(Rarity::Uncommon));
-        pool.add(Card::sample(Rarity::Uncommon));
-        pool.add(Card::sample(Rarity::Uncommon));
-        pool.add(Card::sample(Rarity::Common));
-        pool.add(Card::sample(Rarity::Common));
-        pool.add(Card::sample(Rarity::Common));
-        pool.add(Card::sample(Rarity::Common));
-
+        let pool = DraftPool::sample(4, 4, 4, 4);
         let packs = make_packs(2, &config, pool).unwrap();
         assert!(packs.len() == 4); // 2 players, 2 packs each
         assert!(packs.iter().all(|p| p.len() == 3)); // 3 cards per pack
