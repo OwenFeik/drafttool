@@ -15,7 +15,7 @@ use super::{
 };
 
 #[derive(Clone, Debug, serde::Serialize)]
-pub enum DraftServerMessage {
+pub enum ServerMessage {
     /// Draft already started, cannot join.
     Started,
     /// Draft ended.
@@ -25,6 +25,9 @@ pub enum DraftServerMessage {
 
     /// New pack for user to pick from.
     Pack(Pack),
+
+    /// Pick was successful, current pack has been passed on.
+    Passed,
 
     /// Draft finished, here's your final pool.
     Finished(Vec<Card>),
@@ -46,7 +49,7 @@ pub enum DraftServerMessage {
 }
 
 #[derive(Debug, serde::Deserialize)]
-pub enum DraftClientMessage {
+pub enum ClientMessage {
     HeartBeat,
     ReadyState(bool),
     Disconnected,
@@ -56,13 +59,18 @@ pub enum DraftClientMessage {
 
 #[derive(Debug)]
 pub enum DraftServerRequest {
-    Connect(Uuid, UnboundedSender<DraftServerMessage>),
-    Message(Uuid, DraftClientMessage),
+    Connect(Uuid, UnboundedSender<ServerMessage>),
+    Message(Uuid, ClientMessage),
     Terminate(String),
 }
 
+pub struct ServerHandle {
+    id: Uuid,
+    chan: UnboundedSender<DraftServerRequest>,
+}
+
 pub struct ServerPool {
-    servers: HashMap<Uuid, UnboundedSender<DraftServerRequest>>,
+    servers: HashMap<Uuid, ServerHandle>,
 }
 
 impl ServerPool {
@@ -93,12 +101,12 @@ enum Phase {
 struct Client {
     id: Uuid,
     name: String,
-    chan: UnboundedSender<DraftServerMessage>,
+    chan: UnboundedSender<ServerMessage>,
     heartbeat: Instant,
 }
 
 impl Client {
-    fn send(&self, message: DraftServerMessage) {
+    fn send(&self, message: ServerMessage) {
         self.chan.send(message).ok();
     }
 }
@@ -131,10 +139,10 @@ impl DraftServer {
     fn terminate(&mut self, error: String) {
         self.phase = Phase::Terminated;
         self.chan.close();
-        self.broadcast(DraftServerMessage::FatalError(error));
+        self.broadcast(ServerMessage::FatalError(error));
     }
 
-    fn broadcast(&self, message: DraftServerMessage) {
+    fn broadcast(&self, message: ServerMessage) {
         for client in self.clients.values() {
             client.send(message.clone());
         }
@@ -150,23 +158,23 @@ impl DraftServer {
         }
     }
 
-    fn handle_client_connection(&mut self, id: Uuid, chan: UnboundedSender<DraftServerMessage>) {
+    fn handle_client_connection(&mut self, id: Uuid, chan: UnboundedSender<ServerMessage>) {
         if let Some(client) = self.clients.get_mut(&id) {
             client.chan = chan;
             let client = self.clients.get(&id).unwrap(); // de-mut reference.
             match &self.phase {
-                Phase::Lobby(..) => client.send(DraftServerMessage::Connected {
+                Phase::Lobby(..) => client.send(ServerMessage::Connected {
                     draft: self.id,
                     seat: id,
                     players: self.player_list(),
                 }),
-                Phase::Draft(draft) => client.send(DraftServerMessage::Reconnected {
+                Phase::Draft(draft) => client.send(ServerMessage::Reconnected {
                     draft: self.id,
                     seat: id,
                     pool: draft.drafted_cards(id).cloned().unwrap_or_default(),
-                    pack: draft.current_pack(id).cloned(),
+                    pack: draft.current_pack(id),
                 }),
-                Phase::Finished(pools) => client.send(DraftServerMessage::Reconnected {
+                Phase::Finished(pools) => client.send(ServerMessage::Reconnected {
                     draft: self.id,
                     seat: id,
                     pool: pools.get(&id).cloned().unwrap_or_default(),
@@ -185,42 +193,47 @@ impl DraftServer {
             self.clients.insert(id, client);
             self.send_to(
                 id,
-                DraftServerMessage::Connected {
+                ServerMessage::Connected {
                     draft: self.id,
                     seat: id,
                     players: self.player_list(),
                 },
             );
         } else {
-            chan.send(DraftServerMessage::Started).ok();
+            chan.send(ServerMessage::Started).ok();
         }
     }
 
-    fn handle_client_message(&mut self, id: Uuid, msg: DraftClientMessage) {
+    fn handle_client_message(&mut self, id: Uuid, msg: ClientMessage) {
         if let Some(client) = self.clients.get_mut(&id) {
             client.heartbeat = Instant::now();
             match msg {
-                DraftClientMessage::HeartBeat => client.heartbeat = Instant::now(),
-                DraftClientMessage::ReadyState(ready) => {
+                ClientMessage::HeartBeat => client.heartbeat = Instant::now(),
+                ClientMessage::ReadyState(ready) => {
                     if let Phase::Lobby(readys, ..) = &mut self.phase {
                         readys.insert(id, ready);
                         self.start_if_ready();
                     }
                 }
-                DraftClientMessage::Disconnected => {
+                ClientMessage::Disconnected => {
                     if let Phase::Lobby(readys, ..) = &mut self.phase {
                         self.clients.remove(&id);
                         readys.remove(&id);
                     }
                 }
-                DraftClientMessage::SetName(name) => {
+                ClientMessage::SetName(name) => {
                     client.name = name;
                 }
-                DraftClientMessage::Pick(index) => {
+                ClientMessage::Pick(index) => {
                     if let Phase::Draft(draft) = &mut self.phase {
                         if let Some(packs) = draft.handle_pick(id, index) {
+                            client.send(ServerMessage::Passed);
                             self.send_packs(packs);
                             self.finish_if_done();
+                        } else if let Some(pack) = draft.current_pack(id) {
+                            // Invalid pick command. Maybe client pack is
+                            // desynced? Resend current pack.
+                            client.send(ServerMessage::Pack(pack));
                         }
                     }
                 }
@@ -228,7 +241,7 @@ impl DraftServer {
         }
     }
 
-    fn send_to(&self, id: Uuid, message: DraftServerMessage) {
+    fn send_to(&self, id: Uuid, message: ServerMessage) {
         if let Some(client) = self.clients.get(&id) {
             client.send(message);
         }
@@ -236,7 +249,7 @@ impl DraftServer {
 
     fn send_packs(&self, packs: Vec<(Uuid, Pack)>) {
         for (id, pack) in packs {
-            self.send_to(id, DraftServerMessage::Pack(pack));
+            self.send_to(id, ServerMessage::Pack(pack));
         }
     }
 
@@ -273,7 +286,7 @@ impl DraftServer {
             if draft.draft_complete() {
                 let pools = draft.pools().clone();
                 for (id, pool) in &pools {
-                    self.send_to(*id, DraftServerMessage::Finished(pool.clone()));
+                    self.send_to(*id, ServerMessage::Finished(pool.clone()));
                 }
                 self.phase = Phase::Finished(pools);
             }
@@ -283,6 +296,8 @@ impl DraftServer {
 
 #[cfg(test)]
 mod test {
+    use tokio::sync::mpsc::unbounded_channel;
+
     use super::*;
     use crate::draft::packs::DraftPool;
 
@@ -292,13 +307,19 @@ mod test {
             .is_ok());
     }
 
-    #[tokio::test]
-    async fn test_joining_server() {
-        let (server, handle) = DraftServer::spawn(Default::default(), DraftPool::new());
+    fn assert_send(handle: &UnboundedSender<DraftServerRequest>, id: Uuid, message: ClientMessage) {
+        assert!(handle
+            .send(DraftServerRequest::Message(id, message,))
+            .is_ok());
+    }
+
+    async fn add_client(
+        handle: &UnboundedSender<DraftServerRequest>,
+    ) -> (Uuid, UnboundedReceiver<ServerMessage>) {
         let user = Uuid::new_v4();
-        let (send, mut recv) = tokio::sync::mpsc::unbounded_channel();
+        let (send, mut recv) = unbounded_channel();
         assert!(handle.send(DraftServerRequest::Connect(user, send)).is_ok());
-        if let DraftServerMessage::Connected {
+        if let ServerMessage::Connected {
             draft,
             seat,
             players,
@@ -310,11 +331,61 @@ mod test {
         } else {
             panic!("Expected to receive connected message first.");
         };
+        (user, recv)
+    }
 
+    #[tokio::test]
+    async fn test_joining_server() {
+        let (server, handle) = DraftServer::spawn(Default::default(), DraftPool::new());
+        let (user, mut recv) = add_client(&handle);
         close_server(handle);
         assert!(matches!(
             recv.recv().await.unwrap(),
-            DraftServerMessage::FatalError(..)
+            ServerMessage::FatalError(..)
         ));
+    }
+
+    #[tokio::test]
+    async fn test_draft() {
+        let pool = DraftPool::sample(1, 1, 1, 1);
+        let config = DraftConfig {
+            rounds: 1,
+            cards_per_pack: 2,
+            unique_cards: true,
+            use_rarities: false,
+            ..Default::default()
+        };
+        let (server, handle) = DraftServer::spawn(config, pool);
+        let (p1, mut chan1) = add_client(&handle);
+        let (p2, mut chan2) = add_client(&handle);
+
+        // Both players should connect
+
+        assert!(matches!(
+            chan2.recv().await,
+            Some(ServerMessage::Connected { .. })
+        ));
+
+        // Once both players are ready
+        assert_send(&handle, p1, ClientMessage::ReadyState(true));
+        assert_send(&handle, p2, ClientMessage::ReadyState(true));
+        assert!(matches!(chan1.recv().await, Some(ServerMessage::Pack(..))));
+        assert!(matches!(chan2.recv().await, Some(ServerMessage::Pack(..))));
+
+        // Client one passes, don't expect any packs at this stage as they are
+        // backed up behind p2.
+        assert_send(&handle, p1, ClientMessage::Pick(0));
+        assert!(matches!(chan1.recv().await, Some(ServerMessage::Passed)));
+
+        // After p2s pick, both players should be sent a new pack.
+        assert_send(&handle, p2, ClientMessage::Pick(0));
+        assert!(matches!(chan2.recv().await, Some(ServerMessage::Passed)));
+        assert!(matches!(chan2.recv().await, Some(ServerMessage::Pack(..))));
+        assert!(matches!(chan1.recv().await, Some(ServerMessage::Pack(..))));
+
+        assert_send(&handle, p1, ClientMessage::Pick(0));
+        assert!(matches!(chan1.recv().await, Some(ServerMessage::Passed)));
+        assert_send(&handle, p2, ClientMessage::Pick(0));
+        assert!(matches!(chan2.recv().await, Some(ServerMessage::Passed)));
     }
 }

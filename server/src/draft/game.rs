@@ -103,10 +103,11 @@ impl Draft {
     }
 
     /// Get the pack currently being drafted by this player, if any.
-    pub fn current_pack(&self, player: Uuid) -> Option<&Vec<Card>> {
+    pub fn current_pack(&self, player: Uuid) -> Option<Vec<Card>> {
         self.packs_being_drafted
             .get(&player)
             .and_then(|stack| stack.front())
+            .cloned()
     }
 
     /// Get the pool of cards drafted by this player, if any.

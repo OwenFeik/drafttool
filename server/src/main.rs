@@ -94,7 +94,7 @@ async fn websocket_handler(
     } else {
         // Server already closed. Just tell the client the draft has ended.
         sock.on_upgrade(move |mut ws| async move {
-            if let Ok(data) = serde_json::ser::to_vec(&draft::server::DraftServerMessage::Ended) {
+            if let Ok(data) = serde_json::ser::to_vec(&draft::server::ServerMessage::Ended) {
                 ws.send(axum::extract::ws::Message::Binary(data)).await.ok();
             }
         })

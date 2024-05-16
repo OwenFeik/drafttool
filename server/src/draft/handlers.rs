@@ -6,7 +6,10 @@ use uuid::Uuid;
 
 use crate::{
     cards::CardDatabase,
-    draft::{server::{DraftClientMessage, DraftServerMessage}, DraftConfig},
+    draft::{
+        server::{ClientMessage, ServerMessage},
+        DraftConfig,
+    },
     Resp, Servers,
 };
 
@@ -137,7 +140,7 @@ pub async fn handle_websocket_connection(
         .is_err()
     {
         tracing::debug!("Attempted to join already closed draft.");
-        if let Ok(data) = serde_json::ser::to_vec(&DraftServerMessage::Ended) {
+        if let Ok(data) = serde_json::ser::to_vec(&ServerMessage::Ended) {
             ws.send(Message::Binary(data)).await.ok();
         }
         return;
@@ -192,5 +195,10 @@ pub async fn handle_websocket_connection(
         _ = (&mut recv_task) => send_task.abort(),
     };
 
-    server.send(DraftServerRequest::Message(seat, DraftClientMessage::Disconnected)).ok();
+    server
+        .send(DraftServerRequest::Message(
+            seat,
+            ClientMessage::Disconnected,
+        ))
+        .ok();
 }
