@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use axum::{
-    extract::{FromRef, Multipart, Path, State, WebSocketUpgrade},
+    extract::{Multipart, Path, State, WebSocketUpgrade},
     http::{Response, StatusCode},
     response::IntoResponse,
     routing::{get, post},

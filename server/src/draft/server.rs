@@ -64,9 +64,20 @@ pub enum DraftServerRequest {
     Terminate(String),
 }
 
+#[derive(Clone)]
 pub struct ServerHandle {
     id: Uuid,
     chan: UnboundedSender<DraftServerRequest>,
+}
+
+impl ServerHandle {
+    pub fn send(&self, req: DraftServerRequest) {
+        self.chan.send(req).ok();
+    }
+
+    pub fn is_open(&self) -> bool {
+        !self.chan.is_closed()
+    }
 }
 
 pub struct ServerPool {
@@ -81,12 +92,13 @@ impl ServerPool {
     }
 
     pub fn spawn(&mut self, config: DraftConfig, pool: DraftPool) -> Uuid {
-        let (id, handle) = DraftServer::spawn(config, pool);
+        let handle = DraftServer::spawn(config, pool);
+        let id = handle.id;
         self.servers.insert(id, handle);
         id
     }
 
-    pub fn handle(&self, id: Uuid) -> Option<UnboundedSender<DraftServerRequest>> {
+    pub fn handle(&self, id: Uuid) -> Option<ServerHandle> {
         self.servers.get(&id).cloned()
     }
 }
@@ -119,7 +131,7 @@ pub struct DraftServer {
 }
 
 impl DraftServer {
-    fn spawn(config: DraftConfig, pool: DraftPool) -> (Uuid, UnboundedSender<DraftServerRequest>) {
+    fn spawn(config: DraftConfig, pool: DraftPool) -> ServerHandle {
         let id = Uuid::new_v4();
         let (send, recv) = tokio::sync::mpsc::unbounded_channel();
 
@@ -133,7 +145,7 @@ impl DraftServer {
             server.run().await;
         });
 
-        (id, send)
+        ServerHandle { id, chan: send }
     }
 
     fn terminate(&mut self, error: String) {
@@ -301,33 +313,29 @@ mod test {
     use super::*;
     use crate::draft::packs::DraftPool;
 
-    fn close_server(handle: UnboundedSender<DraftServerRequest>) {
-        assert!(handle
-            .send(DraftServerRequest::Terminate(String::new()))
-            .is_ok());
+    fn close_server(handle: ServerHandle) {
+        handle.send(DraftServerRequest::Terminate(String::new()));
     }
 
-    fn assert_send(handle: &UnboundedSender<DraftServerRequest>, id: Uuid, message: ClientMessage) {
-        assert!(handle
-            .send(DraftServerRequest::Message(id, message,))
-            .is_ok());
+    fn client_send(handle: &ServerHandle, id: Uuid, message: ClientMessage) {
+        handle.send(DraftServerRequest::Message(id, message,))
     }
 
     async fn add_client(
-        handle: &UnboundedSender<DraftServerRequest>,
+        handle: &ServerHandle,
     ) -> (Uuid, UnboundedReceiver<ServerMessage>) {
         let user = Uuid::new_v4();
         let (send, mut recv) = unbounded_channel();
-        assert!(handle.send(DraftServerRequest::Connect(user, send)).is_ok());
+        handle.send(DraftServerRequest::Connect(user, send));
         if let ServerMessage::Connected {
             draft,
             seat,
             players,
         } = recv.recv().await.unwrap()
         {
-            assert_eq!(draft, server);
+            assert_eq!(draft, handle.id);
             assert_eq!(seat, user);
-            assert_eq!(players, vec![(seat, String::new())]);
+            assert!(players.contains(&(seat, String::new())));
         } else {
             panic!("Expected to receive connected message first.");
         };
@@ -335,9 +343,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_joining_server() {
-        let (server, handle) = DraftServer::spawn(Default::default(), DraftPool::new());
-        let (user, mut recv) = add_client(&handle);
+    async fn test_joining_closing_server() {
+        let handle = DraftServer::spawn(Default::default(), DraftPool::new());
+        let (_user, mut recv) = add_client(&handle).await;
         close_server(handle);
         assert!(matches!(
             recv.recv().await.unwrap(),
@@ -355,9 +363,9 @@ mod test {
             use_rarities: false,
             ..Default::default()
         };
-        let (server, handle) = DraftServer::spawn(config, pool);
-        let (p1, mut chan1) = add_client(&handle);
-        let (p2, mut chan2) = add_client(&handle);
+        let handle = DraftServer::spawn(config, pool);
+        let (p1, mut chan1) = add_client(&handle).await;
+        let (p2, mut chan2) = add_client(&handle).await;
 
         // Both players should connect
 
@@ -367,25 +375,25 @@ mod test {
         ));
 
         // Once both players are ready
-        assert_send(&handle, p1, ClientMessage::ReadyState(true));
-        assert_send(&handle, p2, ClientMessage::ReadyState(true));
+        client_send(&handle, p1, ClientMessage::ReadyState(true));
+        client_send(&handle, p2, ClientMessage::ReadyState(true));
         assert!(matches!(chan1.recv().await, Some(ServerMessage::Pack(..))));
         assert!(matches!(chan2.recv().await, Some(ServerMessage::Pack(..))));
 
         // Client one passes, don't expect any packs at this stage as they are
         // backed up behind p2.
-        assert_send(&handle, p1, ClientMessage::Pick(0));
+        client_send(&handle, p1, ClientMessage::Pick(0));
         assert!(matches!(chan1.recv().await, Some(ServerMessage::Passed)));
 
         // After p2s pick, both players should be sent a new pack.
-        assert_send(&handle, p2, ClientMessage::Pick(0));
+        client_send(&handle, p2, ClientMessage::Pick(0));
         assert!(matches!(chan2.recv().await, Some(ServerMessage::Passed)));
         assert!(matches!(chan2.recv().await, Some(ServerMessage::Pack(..))));
         assert!(matches!(chan1.recv().await, Some(ServerMessage::Pack(..))));
 
-        assert_send(&handle, p1, ClientMessage::Pick(0));
+        client_send(&handle, p1, ClientMessage::Pick(0));
         assert!(matches!(chan1.recv().await, Some(ServerMessage::Passed)));
-        assert_send(&handle, p2, ClientMessage::Pick(0));
+        client_send(&handle, p2, ClientMessage::Pick(0));
         assert!(matches!(chan2.recv().await, Some(ServerMessage::Passed)));
     }
 }

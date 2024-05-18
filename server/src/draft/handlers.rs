@@ -13,7 +13,7 @@ use crate::{
     Resp, Servers,
 };
 
-use super::{packs::DraftPool, server::DraftServerRequest};
+use super::{packs::DraftPool, server::{DraftServerRequest, ServerHandle}};
 
 pub async fn handle_launch_request(
     carddb: Arc<CardDatabase>,
@@ -119,7 +119,7 @@ pub async fn handle_launch_request(
 
 pub async fn handle_websocket_connection(
     mut ws: WebSocket,
-    server: tokio::sync::mpsc::UnboundedSender<DraftServerRequest>,
+    server: ServerHandle,
     seat: Uuid,
 ) {
     // Test sending a ping to validate the connection.
@@ -132,19 +132,18 @@ pub async fn handle_websocket_connection(
         return;
     }
 
-    // Attempt to send channel to server to allow server to message client. If
-    // the server is already closed, abort the connection.
-    let (send, mut recv) = tokio::sync::mpsc::unbounded_channel();
-    if server
-        .send(DraftServerRequest::Connect(seat, send))
-        .is_err()
-    {
+    // If the server is already closed, abort the connection.
+    if !server.is_open() {
         tracing::debug!("Attempted to join already closed draft.");
         if let Ok(data) = serde_json::ser::to_vec(&ServerMessage::Ended) {
             ws.send(Message::Binary(data)).await.ok();
         }
         return;
     }
+
+    // Attempt to send channel to server to allow server to message client.
+    let (send, mut recv) = tokio::sync::mpsc::unbounded_channel();
+    server.send(DraftServerRequest::Connect(seat, send));
 
     // Split the websocket. The send half will handle encoding messages from the
     // server and forwarding them to the client, while the receive half will
@@ -176,14 +175,7 @@ pub async fn handle_websocket_connection(
             };
 
             match msg {
-                Ok(message) => {
-                    if handle
-                        .send(DraftServerRequest::Message(seat, message))
-                        .is_err()
-                    {
-                        break; // server closed.
-                    }
-                }
+                Ok(message) => handle.send(DraftServerRequest::Message(seat, message)),
                 Err(e) => tracing::debug!("Failed to decode client message: {e}"),
             };
         }
@@ -195,10 +187,5 @@ pub async fn handle_websocket_connection(
         _ = (&mut recv_task) => send_task.abort(),
     };
 
-    server
-        .send(DraftServerRequest::Message(
-            seat,
-            ClientMessage::Disconnected,
-        ))
-        .ok();
+    server.send(DraftServerRequest::Message(seat, ClientMessage::Disconnected));
 }
