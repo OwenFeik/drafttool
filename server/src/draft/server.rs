@@ -287,7 +287,7 @@ impl DraftServer {
                         self.send_packs(draft.begin());
                         self.phase = Phase::Draft(draft);
                     }
-                    Err(e) => self.terminate(e),
+                    Err(e) => self.terminate(format!("Failed to create packs for draft: {e}")),
                 }
             }
         }
@@ -308,6 +308,8 @@ impl DraftServer {
 
 #[cfg(test)]
 mod test {
+    use std::assert_matches::assert_matches;
+
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
@@ -318,12 +320,18 @@ mod test {
     }
 
     fn client_send(handle: &ServerHandle, id: Uuid, message: ClientMessage) {
-        handle.send(DraftServerRequest::Message(id, message,))
+        handle.send(DraftServerRequest::Message(id, message))
     }
 
-    async fn add_client(
-        handle: &ServerHandle,
-    ) -> (Uuid, UnboundedReceiver<ServerMessage>) {
+    async fn receive(chan: &mut UnboundedReceiver<ServerMessage>) -> ServerMessage {
+        match tokio::time::timeout(tokio::time::Duration::from_millis(1), chan.recv()).await {
+            Ok(Some(msg)) => msg,
+            Ok(None) => panic!("Channel was closed, expected to receive a message."),
+            Err(_) => panic!("Didn't receive on channel after 1ms."),
+        }
+    }
+
+    async fn add_client(handle: &ServerHandle) -> (Uuid, UnboundedReceiver<ServerMessage>) {
         let user = Uuid::new_v4();
         let (send, mut recv) = unbounded_channel();
         handle.send(DraftServerRequest::Connect(user, send));
@@ -347,10 +355,7 @@ mod test {
         let handle = DraftServer::spawn(Default::default(), DraftPool::new());
         let (_user, mut recv) = add_client(&handle).await;
         close_server(handle);
-        assert!(matches!(
-            recv.recv().await.unwrap(),
-            ServerMessage::FatalError(..)
-        ));
+        assert_matches!(recv.recv().await.unwrap(), ServerMessage::FatalError(..));
     }
 
     #[tokio::test]
@@ -367,33 +372,29 @@ mod test {
         let (p1, mut chan1) = add_client(&handle).await;
         let (p2, mut chan2) = add_client(&handle).await;
 
-        // Both players should connect
-
-        assert!(matches!(
-            chan2.recv().await,
-            Some(ServerMessage::Connected { .. })
-        ));
-
         // Once both players are ready
         client_send(&handle, p1, ClientMessage::ReadyState(true));
         client_send(&handle, p2, ClientMessage::ReadyState(true));
-        assert!(matches!(chan1.recv().await, Some(ServerMessage::Pack(..))));
-        assert!(matches!(chan2.recv().await, Some(ServerMessage::Pack(..))));
+        assert_matches!(receive(&mut chan1).await, ServerMessage::Pack(..));
+        assert_matches!(receive(&mut chan2).await, ServerMessage::Pack(..));
 
         // Client one passes, don't expect any packs at this stage as they are
         // backed up behind p2.
         client_send(&handle, p1, ClientMessage::Pick(0));
-        assert!(matches!(chan1.recv().await, Some(ServerMessage::Passed)));
+        assert_matches!(receive(&mut chan1).await, ServerMessage::Passed);
 
         // After p2s pick, both players should be sent a new pack.
         client_send(&handle, p2, ClientMessage::Pick(0));
-        assert!(matches!(chan2.recv().await, Some(ServerMessage::Passed)));
-        assert!(matches!(chan2.recv().await, Some(ServerMessage::Pack(..))));
-        assert!(matches!(chan1.recv().await, Some(ServerMessage::Pack(..))));
+        assert_matches!(receive(&mut chan2).await, ServerMessage::Passed);
+        assert_matches!(receive(&mut chan2).await, ServerMessage::Pack(..));
+        assert_matches!(receive(&mut chan1).await, ServerMessage::Pack(..));
 
         client_send(&handle, p1, ClientMessage::Pick(0));
-        assert!(matches!(chan1.recv().await, Some(ServerMessage::Passed)));
+        assert_matches!(receive(&mut chan1).await, ServerMessage::Passed);
         client_send(&handle, p2, ClientMessage::Pick(0));
-        assert!(matches!(chan2.recv().await, Some(ServerMessage::Passed)));
+        assert_matches!(receive(&mut chan2).await, ServerMessage::Passed);
+
+        assert_matches!(receive(&mut chan1).await, ServerMessage::Finished(cards) if cards.len() == 2);
+        assert_matches!(receive(&mut chan2).await, ServerMessage::Finished(cards) if cards.len() == 2);
     }
 }

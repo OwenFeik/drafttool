@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 #![feature(let_chains)]
 
 use std::{path::PathBuf, sync::Arc};
@@ -169,7 +170,7 @@ async fn main() {
         .route("/ws/:lobby/:seat", get(resume_seat_handler))
         .route("/ws/:lobby", get(join_table_handler))
         .route("/api/start", post(launch_handler))
-        .route_service("/lobby/:id", ServeFile::new(content.join("lobby.html")))
+        .route_service("/lobby/:id", ServeFile::new(content.join("draft.html")))
         .with_state(Arc::new(AppState {
             carddb: Arc::new(card_db),
             servers: Arc::new(RwLock::new(ServerPool::new())),

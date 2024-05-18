@@ -158,7 +158,11 @@ impl Debug for DraftPool {
 
 pub type Pack = Vec<Card>;
 
-fn make_cube_packs(players: usize, config: &DraftConfig, mut pool: DraftPool) -> Res<Vec<Pack>> {
+fn make_cube_packs_rarities(
+    players: usize,
+    config: &DraftConfig,
+    mut pool: DraftPool,
+) -> Res<Vec<Pack>> {
     let mut rng = thread_rng();
     pool.mythics.shuffle(&mut rng);
     pool.rares.shuffle(&mut rng);
@@ -187,6 +191,34 @@ fn make_cube_packs(players: usize, config: &DraftConfig, mut pool: DraftPool) ->
         }
 
         packs.push(pack)
+    }
+
+    Ok(packs)
+}
+
+fn make_cube_packs_no_rarities(
+    players: usize,
+    config: &DraftConfig,
+    mut pool: DraftPool,
+) -> Res<Vec<Pack>> {
+    let mut cards = Vec::new();
+    cards.append(&mut pool.mythics);
+    cards.append(&mut pool.rares);
+    cards.append(&mut pool.uncommons);
+    cards.append(&mut pool.commons);
+    cards.shuffle(&mut thread_rng());
+
+    let mut packs = Vec::new();
+    for _ in 0..(players * config.rounds) {
+        let mut pack = Vec::new();
+        for _ in 0..config.cards_per_pack {
+            if let Some(card) = cards.pop() {
+                pack.push(card);
+            } else {
+                return err("Insufficient cards in pool.");
+            }
+        }
+        packs.push(pack);
     }
 
     Ok(packs)
@@ -223,7 +255,11 @@ fn make_draft_packs(players: usize, config: &DraftConfig, pool: DraftPool) -> Re
 
 pub fn make_packs(players: usize, config: &DraftConfig, pool: DraftPool) -> Res<Vec<Pack>> {
     if config.unique_cards {
-        make_cube_packs(players, config, pool)
+        if config.use_rarities {
+            make_cube_packs_rarities(players, config, pool)
+        } else {
+            make_cube_packs_no_rarities(players, config, pool)
+        }
     } else {
         make_draft_packs(players, config, pool)
     }
@@ -304,5 +340,18 @@ mod test {
         let mut pool = DraftPool::new();
         pool.add(Card::sample(Rarity::Common));
         assert!(make_packs(1, &config, pool).is_err());
+    }
+
+    #[test]
+    fn test_no_raritie_unique() {
+        let pool = DraftPool::sample(1, 1, 1, 1);
+        let config = DraftConfig {
+            rounds: 1,
+            cards_per_pack: 2,
+            unique_cards: true,
+            use_rarities: false,
+            ..Default::default()
+        };
+        assert!(make_packs(2, &config, pool).is_ok());
     }
 }

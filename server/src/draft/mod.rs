@@ -1,7 +1,5 @@
 use std::fmt::Debug;
 
-use crate::cards::{Card, Rarity};
-
 mod game;
 pub mod handlers;
 mod packs;
