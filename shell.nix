@@ -6,5 +6,6 @@ in
       rustup
       pkg-config
       openssl
+      typescript
     ];
   }

@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 
+set -e
+
 ROOT="$(dirname "$0")"
+BUILD="$ROOT/build"
+CONTENT="$BUILD/content"
 
 _cargo() {
-    cargo $1 --manifest-path "$ROOT/server/Cargo.toml" "${@:2}"
+    CARGO_TARGET_DIR="$BUILD/target" cargo $1 \
+        --manifest-path "$ROOT/server/Cargo.toml" "${@:2}"
+}
+
+content() {
+    mkdir -p "$CONTENT"
+    cp "client/"*".html" "client/"*".css" "$CONTENT/"
+    tsc --outDir "$CONTENT/" --lib "es2015,dom" "$ROOT/client/"*".ts"
 }
 
 serve() {
-    _cargo run "$ROOT/client" "$ROOT/server/target/data" 3333
+    _cargo run "$CONTENT/" "$BUILD/data" 3333
 }
 
 test() {
@@ -17,6 +28,11 @@ test() {
 testnocap() {
     _cargo test -- --nocapture
 }
+
+if [ ! -f "$BUILD/.gitignore" ]; then
+    mkdir -p "$BUILD"
+    echo "*" > "$BUILD/.gitignore"
+fi
 
 func="$1"
 if [ "$func" == "" ]; then

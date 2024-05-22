@@ -1,11 +1,28 @@
-const FORM = [
+interface FormInput extends HTMLInputElement {
+    validate?: () => boolean,
+}
+
+interface FormField {
+    name: string,
+    description: string,
+    type: string,
+
+    validate?: (input: FormInput) => (true | string),
+    oninput?: (HTMLInputElement) => void,
+    accept?: string,
+    checked?: boolean,
+    value?: number,
+    step?: string,
+}
+
+const FORM: FormField[] = [
     {
         name: "card_database",
         description: "Card database (Cockatrice XML)",
         type: "file",
         accept: ".xml",
         validate: input => (
-            input.files.length == 1 || "Please select a card database file."
+            input.files?.length == 1 || "Please select a card database file."
         )
     },
     {
@@ -14,7 +31,7 @@ const FORM = [
         type: "file",
         accept: ".txt",
         validate: input => (
-            input.files.length == 1 || "Please select a set list file."
+            input.files?.length == 1 || "Please select a set list file."
         )
     },
     {
@@ -63,11 +80,12 @@ const FORM = [
         type: "number",
         value: 0.125,
         step: "any",
-        validate: input => (
-            (input.value >= 0.0 && input.value <= 1.0)
+        validate: input => {
+            let val = parseFloat(input.value);
+            return (!Number.isNaN(val) && val >= 0.0 && val <= 1.0)
                 || !get_value("use_rarities")
                 || "Must be a probability in [0.0, 1.0]."
-        )
+        }
     },
     {
         name: "rares",
@@ -75,8 +93,8 @@ const FORM = [
         type: "number",
         value: 1,
         oninput: () => {
-            get_input("uncommons").validate();
-            get_input("commons").validate();
+            revalidate("uncommons");
+            revalidate("commons");
         },
         validate: validate_rarity,
     },
@@ -86,8 +104,8 @@ const FORM = [
         type: "number",
         value: 3,
         oninput: () => {
-            get_input("rares").validate();
-            get_input("commons").validate();
+            revalidate("rares");
+            revalidate("commons");
         },
         validate: validate_rarity,
     },
@@ -97,14 +115,14 @@ const FORM = [
         type: "number",
         value: 11,
         oninput: () => {
-            get_input("rares").validate();
-            get_input("uncommons").validate();
+            revalidate("rares");
+            revalidate("uncommons");
         },
         validate: validate_rarity,
     },
 ];
 
-function validate_rarity(input) {
+function validate_rarity(input: FormInput) {
     if (!get_value("use_rarities")) {
         return true; // Value doesn't matter if rarities disabled.
     }
@@ -114,10 +132,10 @@ function validate_rarity(input) {
         return "Must be a number from 0 to number of cards per pack.";
     }
 
-    let total = get_value("cards_per_pack");
-    let rares = get_value("rares");
-    let uncommons = get_value("uncommons");
-    let commons = get_value("commons");
+    let total = +get_value("cards_per_pack");
+    let rares = +get_value("rares");
+    let uncommons = +get_value("uncommons");
+    let commons = +get_value("commons");
     if (rares + uncommons + commons != total) {
         return "Rares + uncommons + commons must equal cards per pack.";
     }
@@ -125,13 +143,19 @@ function validate_rarity(input) {
     return true;
 }
 
-function get_input(name) {
+function revalidate(name: string) {
+    get_input(name)?.validate?.();
+}
+
+function get_input(name: string): FormInput | null {
     return document.querySelector(`input[name="${name}"]`);
 }
 
-function get_value(name) {
+function get_value(name: string) {
     let input = get_input(name);
-    if (input.type == "checkbox") {
+    if (input == null) {
+        return false;
+    } else if (input.type == "checkbox") {
         return input.checked;
     } else if (input.type == "number") {
         return parseFloat(input.value);
@@ -140,9 +164,17 @@ function get_value(name) {
     }
 }
 
-function set_field_visible(name, visible) {
+function set_field_visible(name: string, visible: boolean) {
     let input = get_input(name);
+    if (input == null) {
+        return;
+    }
+
     let row = input.parentElement;
+    if (row == null) {
+        return;
+    }
+
     if (visible) {
         row.style.display = "";
     } else {
@@ -155,9 +187,13 @@ function set_field_visible(name, visible) {
 }
 
 function build_form() {
-    const form = document.getElementById("config");
-    let inputs = [];
-    FORM.forEach(field => {
+    const form = document.createElement("form");
+    form.id = "config";
+    form.method = "POST";
+    form.enctype = "multipart/form-data";
+    form.action = "/api/start";
+
+    let inputs = FORM.map(field => {
         let row = document.createElement("div");
         row.classList.add("row");
 
@@ -165,14 +201,14 @@ function build_form() {
         label.innerText = field.description;
         row.appendChild(label);
         
-        let input = document.createElement("input");
+        let input: FormInput = document.createElement("input");
         input.name = field.name;
         input.type = field.type;
         if (field.checked) {
             input.checked = true;
         }
         if (field.value) {
-            input.value = field.value;
+            input.value = String(field.value);
         }
         if (field.accept) {
             input.accept = field.accept;
@@ -181,11 +217,11 @@ function build_form() {
             input.step = field.step;
         }
         if (field.oninput) {
-            input.addEventListener("input", () => field.oninput(input));
+            input.addEventListener("input", () => field.oninput?.(input));
         }
         if (field.validate) {
             input.validate = () => {
-                let validity = field.validate(input);
+                let validity = field.validate?.(input);
                 if (typeof validity == "string") {
                     input.setCustomValidity(validity);
                     return false;
@@ -194,7 +230,7 @@ function build_form() {
                     return true;
                 }
             };
-            input.addEventListener("input", () => input.validate(input));
+            input.addEventListener("input", () => input.validate?.());
         }
         if (field.type == "checkbox") {
             input.addEventListener(
@@ -205,9 +241,9 @@ function build_form() {
         }
 
         row.appendChild(input);
-        inputs.push(input);
-
         form.appendChild(row);
+
+        return input;
     });
 
     let row = document.createElement("div");

@@ -13,7 +13,10 @@ use crate::{
     Resp, Servers,
 };
 
-use super::{packs::DraftPool, server::{DraftServerRequest, ServerHandle}};
+use super::{
+    packs::DraftPool,
+    server::{DraftServerRequest, ServerHandle},
+};
 
 pub async fn handle_launch_request(
     carddb: Arc<CardDatabase>,
@@ -117,11 +120,7 @@ pub async fn handle_launch_request(
     Resp::redirect(format!("/lobby/{id}"), "Draft launched.".to_string())
 }
 
-pub async fn handle_websocket_connection(
-    mut ws: WebSocket,
-    server: ServerHandle,
-    seat: Uuid,
-) {
+pub async fn handle_websocket_connection(mut ws: WebSocket, server: ServerHandle, seat: Uuid) {
     // Test sending a ping to validate the connection.
     if !ws
         .send(Message::Ping("ping".as_bytes().to_owned()))
@@ -187,5 +186,8 @@ pub async fn handle_websocket_connection(
         _ = (&mut recv_task) => send_task.abort(),
     };
 
-    server.send(DraftServerRequest::Message(seat, ClientMessage::Disconnected));
+    server.send(DraftServerRequest::Message(
+        seat,
+        ClientMessage::Disconnected,
+    ));
 }
