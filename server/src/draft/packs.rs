@@ -299,7 +299,7 @@ mod test {
         // to mythics.
         assert!(packs
             .iter()
-            .all(|p| p.iter().find(|c| c.rarity == Rarity::Mythic).is_some()));
+            .all(|p| p.iter().any(|c| c.rarity == Rarity::Mythic)));
     }
 
     #[test]

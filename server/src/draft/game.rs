@@ -153,12 +153,7 @@ impl Draft {
     fn pool_for(&mut self, player: Uuid) -> &mut Vec<Card> {
         debug_assert!(self.players.contains(&player));
 
-        if !self.pools.contains_key(&player) {
-            self.pools.insert(player, Vec::new());
-        }
-
-        // Unwrap ok because we just created the key if it didn't already exist.
-        self.pools.get_mut(&player).unwrap()
+        self.pools.entry(player).or_default()
     }
 
     /// Get a mutable reference to the stack of packs waiting for the specified
@@ -166,11 +161,7 @@ impl Draft {
     fn stack_for(&mut self, player: Uuid) -> &mut VecDeque<Vec<Card>> {
         debug_assert!(self.players.contains(&player));
 
-        if !self.packs_being_drafted.contains_key(&player) {
-            self.packs_being_drafted.insert(player, VecDeque::new());
-        }
-
-        self.packs_being_drafted.get_mut(&player).unwrap()
+        self.packs_being_drafted.entry(player).or_default()
     }
 
     /// Check if this draft round is complete. This is the case when all packs

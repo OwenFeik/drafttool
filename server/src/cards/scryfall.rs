@@ -81,7 +81,7 @@ struct ScryfallCard {
 }
 
 impl ScryfallCard {
-    fn to_card(self) -> Option<Card> {
+    fn into_card(self) -> Option<Card> {
         let name = if self.name.contains("//") {
             self.name.split("//").next().unwrap().to_string()
         } else {
@@ -128,6 +128,6 @@ pub async fn load_cards(data: &Path) -> Result<Vec<Card>, String> {
     tracing::debug!("Converting parsed JSON into card structs.");
     Ok(cards
         .into_iter()
-        .filter_map(ScryfallCard::to_card)
+        .filter_map(ScryfallCard::into_card)
         .collect())
 }

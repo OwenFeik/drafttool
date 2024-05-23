@@ -45,10 +45,6 @@ impl Resp {
         )
     }
 
-    fn ok<S: ToString>(message: S) -> Response<String> {
-        Self::basic(message, StatusCode::OK)
-    }
-
     fn e500<S: ToString>(message: S) -> Response<String> {
         Self::basic(message, StatusCode::INTERNAL_SERVER_ERROR)
     }
