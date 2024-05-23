@@ -15,6 +15,7 @@ use super::{
 };
 
 #[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "type", content = "value")]
 pub enum ServerMessage {
     /// Draft already started, cannot join.
     Started,
@@ -24,7 +25,7 @@ pub enum ServerMessage {
     FatalError(String),
 
     /// New pack for user to pick from.
-    Pack(Pack),
+    Pack(Pack), // TODO this should include an ID to handle out of order events
 
     /// Pick was successful, current pack has been passed on.
     Passed,
@@ -211,6 +212,8 @@ impl DraftServer {
                     players: self.player_list(),
                 },
             );
+            self.send_to(id, ServerMessage::Started);
+            self.send_to(id, ServerMessage::FatalError("err".into()));
         } else {
             chan.send(ServerMessage::Started).ok();
         }

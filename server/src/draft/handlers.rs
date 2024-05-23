@@ -30,6 +30,7 @@ pub async fn handle_launch_request(
         let field_name = field.name().unwrap_or("").to_string();
         if field_name == "card_database" {
             match field.bytes().await {
+                Ok(bytes) if bytes.is_empty() => {} // Empty card_database field is OK.
                 Ok(bytes) => match crate::cards::cockatrice::decode_xml_cards(bytes) {
                     Ok(db) => cards = Some(db),
                     Err(e) => return Resp::e422(format!("Failed to load card database: {e}")),
@@ -46,11 +47,11 @@ pub async fn handle_launch_request(
 
         match field_name.as_str() {
             "list" => list = Some(s),
-            "packs" => match usize::from_str_radix(&s, 10) {
+            "packs" => match s.parse::<usize>() {
                 Ok(n) => config.rounds = n,
                 Err(_) => return Resp::e422(format!("Invalid pack count: {s}")),
             },
-            "cards_per_pack" => match usize::from_str_radix(&s, 10) {
+            "cards_per_pack" => match s.parse::<usize>() {
                 Ok(n) => config.cards_per_pack = n,
                 Err(_) => return Resp::e422(format!("Invalid number of cards per pack: {s}")),
             },
@@ -65,18 +66,18 @@ pub async fn handle_launch_request(
                 _ => return Resp::e422(format!("Invalid checkbox value for use_rarities: {s}")),
             },
             "mythic_incidence" => match s.parse::<f32>() {
-                Ok(v) if v >= 0.0 && v <= 1.0 => config.mythic_rate = v,
+                Ok(v) if (0.0..=1.0).contains(&v) => config.mythic_rate = v,
                 _ => return Resp::e422(format!("Invalid mythic incidence: {s}")),
             },
-            "rares" => match usize::from_str_radix(&s, 10) {
+            "rares" => match s.parse::<usize>() {
                 Ok(n) => config.rares = n,
                 Err(_) => return Resp::e422(format!("Invalid number of rares per pack: {s}")),
             },
-            "uncommons" => match usize::from_str_radix(&s, 10) {
+            "uncommons" => match s.parse::<usize>() {
                 Ok(n) => config.uncommons = n,
                 Err(_) => return Resp::e422(format!("Invalid number of commons per pack: {s}")),
             },
-            "commons" => match usize::from_str_radix(&s, 10) {
+            "commons" => match s.parse::<usize>() {
                 Ok(n) => config.commons = n,
                 Err(_) => return Resp::e422(format!("Invalid number of commons per pack: {s}")),
             },
@@ -94,9 +95,6 @@ pub async fn handle_launch_request(
         ));
     }
 
-    let Some(custom_cards) = cards else {
-        return Resp::e422("No card database provided.");
-    };
     let Some(list) = list else {
         return Resp::e422("No card list provided for draft.");
     };
@@ -108,7 +106,11 @@ pub async fn handle_launch_request(
             continue;
         }
 
-        let Some(card) = custom_cards.get(key).or_else(|| carddb.get(key)).cloned() else {
+        let Some(card) = cards
+            .as_ref()
+            .and_then(|ccs| ccs.get(key).cloned())
+            .or_else(|| carddb.get(key).cloned())
+        else {
             return Resp::e422(format!("Card not found in custom list or database: {line}"));
         };
 
@@ -122,10 +124,10 @@ pub async fn handle_launch_request(
 
 pub async fn handle_websocket_connection(mut ws: WebSocket, server: ServerHandle, seat: Uuid) {
     // Test sending a ping to validate the connection.
-    if !ws
+    if ws
         .send(Message::Ping("ping".as_bytes().to_owned()))
         .await
-        .is_ok()
+        .is_err()
     {
         tracing::debug!("Ping on connection failed.");
         return;

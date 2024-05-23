@@ -153,7 +153,10 @@ async fn main() {
     let data = std::env::args().nth(2).expect(USAGE);
     let port = std::env::args()
         .nth(3)
-        .map(|s| u16::from_str_radix(&s, 10).expect(&format!("Invalid port number: {s}")))
+        .map(|s| {
+            s.parse::<u16>()
+                .unwrap_or_else(|_| panic!("Invalid port number: {s}"))
+        })
         .expect(USAGE);
 
     tracing_subscriber::fmt()
@@ -179,8 +182,9 @@ async fn main() {
 
     let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
-        .expect(&format!("Failed to open port {port}"));
+        .unwrap_or_else(|_| panic!("Failed to open port {port}"));
 
+    tracing::debug!("Starting to listen on :{port}");
     if let Err(e) = axum::serve(listener, app).await {
         eprintln!("Closed due to error: {e}");
     }

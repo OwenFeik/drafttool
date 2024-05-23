@@ -8,7 +8,7 @@ interface FormField {
     type: string,
 
     validate?: (input: FormInput) => (true | string),
-    oninput?: (HTMLInputElement) => void,
+    oninput?: (input: FormInput) => void,
     accept?: string,
     checked?: boolean,
     value?: number,
@@ -17,22 +17,19 @@ interface FormField {
 
 const FORM: FormField[] = [
     {
-        name: "card_database",
-        description: "Card database (Cockatrice XML)",
-        type: "file",
-        accept: ".xml",
-        validate: input => (
-            input.files?.length == 1 || "Please select a card database file."
-        )
-    },
-    {
         name: "list",
-        description: "List of cards from the database to include in packs.",
+        description: "List of cards to include in packs.",
         type: "file",
         accept: ".txt",
         validate: input => (
             input.files?.length == 1 || "Please select a set list file."
         )
+    },
+    {
+        name: "card_database",
+        description: "Card database for custom cards (Cockatrice XML)",
+        type: "file",
+        accept: ".xml",
     },
     {
         name: "packs",
@@ -186,6 +183,49 @@ function set_field_visible(name: string, visible: boolean) {
     }
 }
 
+function build_form_input(field: FormField): FormInput {
+    let input: FormInput = document.createElement("input");
+    input.name = field.name;
+    input.type = field.type;
+    if (field.checked) {
+        input.checked = true;
+    }
+    if (field.value) {
+        input.value = String(field.value);
+    }
+    if (field.accept) {
+        input.accept = field.accept;
+    }
+    if (field.step) {
+        input.step = field.step;
+    }
+    if (field.oninput) {
+        input.addEventListener("input", () => field.oninput?.(input));
+    }
+    if (field.validate) {
+        input.validate = () => {
+            let validity = field.validate?.(input);
+            if (typeof validity == "string") {
+                input.setCustomValidity(validity);
+                return false;
+            } else {
+                input.setCustomValidity("");
+                return true;
+            }
+        };
+        input.addEventListener("input", () => input.validate?.());
+    }
+    if (field.type == "checkbox") {
+        input.addEventListener(
+            "input",
+            () => input.value = input.checked ? "checked" : "unchecked"
+        );
+        input.value = input.checked ? "checked" : "unchecked";
+    }
+
+    return input;
+}
+
 function build_form() {
     const form = document.createElement("form");
     form.id = "config";
@@ -193,6 +233,7 @@ function build_form() {
     form.enctype = "multipart/form-data";
     form.action = "/api/start";
 
+    // TODO load field values from localstorage.
     let inputs = FORM.map(field => {
         let row = document.createElement("div");
         row.classList.add("row");
@@ -201,45 +242,7 @@ function build_form() {
         label.innerText = field.description;
         row.appendChild(label);
         
-        let input: FormInput = document.createElement("input");
-        input.name = field.name;
-        input.type = field.type;
-        if (field.checked) {
-            input.checked = true;
-        }
-        if (field.value) {
-            input.value = String(field.value);
-        }
-        if (field.accept) {
-            input.accept = field.accept;
-        }
-        if (field.step) {
-            input.step = field.step;
-        }
-        if (field.oninput) {
-            input.addEventListener("input", () => field.oninput?.(input));
-        }
-        if (field.validate) {
-            input.validate = () => {
-                let validity = field.validate?.(input);
-                if (typeof validity == "string") {
-                    input.setCustomValidity(validity);
-                    return false;
-                } else {
-                    input.setCustomValidity("");
-                    return true;
-                }
-            };
-            input.addEventListener("input", () => input.validate?.());
-        }
-        if (field.type == "checkbox") {
-            input.addEventListener(
-                "input",
-                () => input.value = input.checked ? "checked" : "unchecked"
-            );
-            input.value = input.checked ? "checked" : "unchecked";
-        }
-
+        let input = build_form_input(field);
         row.appendChild(input);
         form.appendChild(row);
 
@@ -252,11 +255,13 @@ function build_form() {
     button.innerText = "Submit";
     button.onclick = () => {
         if (inputs.every(input => !input.validate || input.validate())) {
+            // TODO save field values in localstorage.
             form.submit();
         }
     };
     row.appendChild(button);
     form.appendChild(row);
+    document.body.appendChild(form);
 }
 
 window.onload = () => {

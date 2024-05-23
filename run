@@ -29,11 +29,6 @@ testnocap() {
     _cargo test -- --nocapture
 }
 
-if [ ! -f "$BUILD/.gitignore" ]; then
-    mkdir -p "$BUILD"
-    echo "*" > "$BUILD/.gitignore"
-fi
-
 func="$1"
 if [ "$func" == "" ]; then
     echo "Usage: run <operation>"
