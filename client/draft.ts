@@ -6,6 +6,8 @@ type Card = {
     text: string
 };
 
+type PlayerList = [string, string][];
+
 type ServerMessage =
     { type: "Started" }
     | { type: "Ended" }
@@ -18,7 +20,7 @@ type ServerMessage =
         value: {
             draft: string,
             seat: string,
-            players: [string, string][],
+            players: PlayerList,
         }
     }
     | {
@@ -26,71 +28,236 @@ type ServerMessage =
         value: {
             draft: string,
             seat: string,
+            in_progress: boolean,
             pool: Card[],
             pack?: Card[],
         }
     };
 
 enum Phase {
+    Connecting,
     Lobby,
     Draft,
     Finished,
     Terminated,
 }
 
+type UiState = 
+    { phase: Phase.Connecting }
+    | {
+        phase: Phase.Lobby,
+        updatePlayerList: (players: PlayerList) => void,
+    }
+    | { 
+        phase: Phase.Draft,
+        receivePack: (pack: Card[]) => void,
+        passPack: () => void,
+        updatePlayerList: (players: PlayerList) => void,
+        updatePool: (pool: Card[]) => void,
+    }
+    | {
+        phase: Phase.Finished,
+        updatePlayerList: (players: PlayerList) => void,
+        updatePool: (pool: Card[]) => void,
+    }
+    | {
+        phase: Phase.Terminated,
+        displayErrorMessage: (message: string) => void,
+    };
+
 type State = {
-    phase: Phase,
-    pack?: Card[],
-    pool: Card[],
+    ui: UiState,
     reconnectAttempts: number,
 };
 
 let state: State = {
-    phase: Phase.Lobby,
-    pool: [],
+    ui: { phase: Phase.Connecting },
     reconnectAttempts: 0,
 };
 
+function phaseRootElement(phase: Phase): HTMLElement {
+    switch (phase) {
+        case Phase.Connecting:
+            return document.getElementById("connecting")!;
+        case Phase.Lobby:
+            return document.getElementById("lobby")!;
+        case Phase.Draft:
+            return document.getElementById("draft")!;
+        case Phase.Finished:
+            return document.getElementById("finished")!;
+        case Phase.Terminated:
+            return document.getElementById("terminated")!;
+    }
+}
+
+function setVisible(el: HTMLElement, visible: boolean) {
+    if (visible) {
+        el.style.display = "unset";
+    } else {
+        el.style.display = "none";
+    }
+}
+
+function el(tag: string, parent?: HTMLElement): HTMLElement {
+    let element = document.createElement(tag);
+    if (parent) {
+        parent.appendChild(element);
+    }
+    return element;
+}
+
+function classes(element: HTMLElement, ...classes: string[]): HTMLElement {
+    element.classList.add(...classes);
+    return element;
+}
+
+function text(element: HTMLElement, text: string): HTMLElement {
+    element.innerText = text;
+    return element;
+}
+
+function setUpLobby(root: HTMLElement): UiState {
+    let float = classes(el("div", root), "floating-centered", "simple-border");
+    let table = classes(el("table", float), "padded");
+    let headrow = el("tr", el("thead", table));
+    text(el("td", headrow), "Status");
+    text(el("td", headrow), "User");
+    text(el("td", headrow), "Ready");
+
+    let playerList = el("tbody", table);
+    const updatePlayerList = (players: PlayerList) => {
+        playerList.innerHTML = "";
+        players.forEach(player => {
+            let [id, name] = player;
+            let row = el("tr", playerList);
+            text(el("td", row), "status");
+            text(el("td", row), name != "" ? name : "No name");
+            text(el("td", row), "ready");
+
+            // TODO item for this player should have a button to ready up
+            // TODO each player should have a connection state and a ready state
+        });
+    };
+
+    return {
+        phase: Phase.Lobby,
+        updatePlayerList
+    };
+}
+
+function setUpDraft(root: HTMLElement): UiState {
+    let float = el("div", root);
+    let header = el("div", float);
+    let pack = el("div", header);
+    let pool = el("div", pack);
+
+    return {
+        phase: Phase.Draft,
+        receivePack: null!,      // TODO
+        passPack: null!,         // TODO
+        updatePlayerList: null!, // TODO
+        updatePool: null!,       // TODO
+    };
+}
+
+function setUpFinished(root: HTMLElement): UiState {
+    // TODO set up post-draft pool view. Deck builder?
+    return null!;
+}
+
+function setUpTerminated(root: HTMLElement): UiState {
+    // TODO set up the page to display a fatal error.
+    return null!;
+}
+
 function moveToPhase(phase: Phase) {
-    console.log("Move to phase:", phase);
-    // TODO set up page with appropriate UI for the phase
+    if (phase == state.ui.phase) {
+        // Already in this phase; no need to change anything.
+        return;
+    }
+
+    setVisible(phaseRootElement(state.ui.phase), false);
+
+    let root = phaseRootElement(phase);
+    root.innerHTML = ""; // Reset the phase UI if we've rendered it.
+    setVisible(root, true);
+    switch (phase) {
+        case Phase.Lobby:
+            state.ui = setUpLobby(root);
+            break;
+        case Phase.Draft:
+            state.ui = setUpDraft(root);
+            break;
+        case Phase.Finished:
+            state.ui = setUpFinished(root);
+            break;
+        case Phase.Terminated:
+            state.ui = setUpTerminated(root);
+            break;
+    }
 }
 
 function displayErrorMessage(message: string) {
-    console.log("Server error:", message);
-    // TODO display error to user
+    console.error(message);
+    if (state.ui.phase == Phase.Terminated) {
+        state.ui.displayErrorMessage(message);
+    } else {
+        console.warn("Call to displayErrorMessage when phase not Terminated.");
+    }
+}
+
+function terminate(message: string) {
+    moveToPhase(Phase.Terminated);
+    displayErrorMessage(message);
 }
 
 function receivedPack(pack: Card[]) {
-    console.log("Received pack:", pack);
-    // TODO update current pack to allow user to pick
+    if (state.ui.phase == Phase.Draft) {
+        state.ui.receivePack(pack);
+    } else {
+        console.warn("Can't display pack in phase", state.ui.phase);
+    }
 }
 
 function passedPack() {
-    console.log("Passed pack.");
-    // TODO clear current pack from the interface
+    if (state.ui.phase == Phase.Draft) {
+        state.ui.passPack();
+    } else {
+        console.warn("Can't pass pack in phase", state.ui.phase);
+    }
 }
 
 function updatePool(pool: Card[]) {
-    console.log("Update pool:", pool);
-    // TODO update the users pool of picked cards
+    if (state.ui.phase == Phase.Draft || state.ui.phase == Phase.Finished) {
+        state.ui.updatePool(pool);
+    } else {
+        console.warn("Can't update pool in phase", state.ui.phase);
+    }
 }
 
-function updatePlayerList(playerList: [string, string][]) {
-    console.log("Update player list:", playerList);
-    // TODO update the list of players in the UI
+function updatePlayerList(playerList: PlayerList) {
+    switch (state.ui.phase) {
+        case Phase.Lobby:
+        case Phase.Draft:
+        case Phase.Finished:
+            state.ui.updatePlayerList(playerList);
+            break;
+        default:
+            console.warn("Can't update player list in phase", state.ui.phase);
+            break;
+    }
 }
 
 function handleMessage(message: ServerMessage) {
     switch (message.type) {
         case "Started":
-            break; // TODO failed to join because draft already started.
+            terminate("Failed to join draft. Draft has already started.");
+            break;
         case "Ended":
             moveToPhase(Phase.Finished);
             break;
         case "FatalError":
-            displayErrorMessage(message.value);
-            moveToPhase(Phase.Terminated);
+            terminate("Server error: " + message.value);
             break;
         case "Pack":
             receivedPack(message.value);
@@ -108,7 +275,8 @@ function handleMessage(message: ServerMessage) {
             updatePlayerList(message.value.players);
             break;
         case "Reconnected":
-            // TODO way to identify if draft is in progress or complete
+            let draft_in_progress = message.value.in_progress;
+            moveToPhase(draft_in_progress ? Phase.Draft : Phase.Finished);
             seatToLocalStorage(message.value.draft, message.value.seat);
             updatePool(message.value.pool);
             if (message.value.pack) {
@@ -177,6 +345,7 @@ function openWebsocket(draftId: string) {
 function main() {
     const draftId = determineDraftId();
     if (draftId == null) {
+        terminate("Draft ID not found in URL.");
         return;
     }
 

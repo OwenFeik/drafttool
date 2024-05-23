@@ -2,7 +2,7 @@ interface FormInput extends HTMLInputElement {
     validate?: () => boolean,
 }
 
-interface FormField {
+type FormField = {
     name: string,
     description: string,
     type: string,

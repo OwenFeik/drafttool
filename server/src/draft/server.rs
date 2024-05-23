@@ -44,6 +44,7 @@ pub enum ServerMessage {
     Reconnected {
         draft: Uuid,
         seat: Uuid,
+        in_progress: bool,
         pool: Vec<Card>,
         pack: Option<Vec<Card>>,
     },
@@ -184,12 +185,14 @@ impl DraftServer {
                 Phase::Draft(draft) => client.send(ServerMessage::Reconnected {
                     draft: self.id,
                     seat: id,
+                    in_progress: true,
                     pool: draft.drafted_cards(id).cloned().unwrap_or_default(),
                     pack: draft.current_pack(id),
                 }),
                 Phase::Finished(pools) => client.send(ServerMessage::Reconnected {
                     draft: self.id,
                     seat: id,
+                    in_progress: false,
                     pool: pools.get(&id).cloned().unwrap_or_default(),
                     pack: None,
                 }),
@@ -212,8 +215,6 @@ impl DraftServer {
                     players: self.player_list(),
                 },
             );
-            self.send_to(id, ServerMessage::Started);
-            self.send_to(id, ServerMessage::FatalError("err".into()));
         } else {
             chan.send(ServerMessage::Started).ok();
         }
