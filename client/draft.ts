@@ -51,7 +51,7 @@ type UiState =
     | { 
         phase: Phase.Draft,
         receivePack: (pack: Card[]) => void,
-        passPack: () => void,
+        passedPack: () => void,
         updatePlayerList: (players: PlayerList) => void,
         updatePool: (pool: Card[]) => void,
     }
@@ -116,6 +116,11 @@ function text(element: HTMLElement, text: string): HTMLElement {
     return element;
 }
 
+function attr(element: HTMLElement, key: string, value: string): HTMLElement {
+    element.setAttribute(key, value);
+    return element;
+}
+
 function setUpLobby(root: HTMLElement): UiState {
     let float = classes(el("div", root), "floating-centered", "simple-border");
     let table = classes(el("table", float), "padded");
@@ -147,14 +152,41 @@ function setUpLobby(root: HTMLElement): UiState {
 
 function setUpDraft(root: HTMLElement): UiState {
     let float = el("div", root);
-    let header = el("div", float);
-    let pack = el("div", header);
-    let pool = el("div", pack);
+    let header = classes(el("div", float), "container");
+    let pack = classes(el("div", float), "container", "pack-card-grid");
+    let pool = classes(el("div", float), "container");
+
+    // TODO implement header with player list, other info
+    text(classes(el("div", header), "floating-centered"), "Header");
+
+    // TODO implement pool element with picked cards
+    text(classes(el("div", pool), "floating-centered"), "Picked cards.");
+
+    const receivePack = (cards: Card[]) => {
+        pack.innerHTML = "";
+        if (cards.length == 0) {
+            text(classes(el("div", pack), "floating-centered"), "Empty pack.");
+        }
+
+        cards.forEach(card => {
+            let img = el("img", classes(el("span", pack), "padded"));
+            attr(img, "src", card.image);
+            classes(img, "pack-card-image");
+        });
+    };
+
+    const passedPack = () => {
+        pack.innerHTML = "";
+        text(
+            classes(el("div", pack), "floating-centered"),
+            "Waiting for pack."
+        );
+    };
 
     return {
         phase: Phase.Draft,
-        receivePack: null!,      // TODO
-        passPack: null!,         // TODO
+        receivePack,
+        passedPack,
         updatePlayerList: null!, // TODO
         updatePool: null!,       // TODO
     };
@@ -221,7 +253,7 @@ function receivedPack(pack: Card[]) {
 
 function passedPack() {
     if (state.ui.phase == Phase.Draft) {
-        state.ui.passPack();
+        state.ui.passedPack();
     } else {
         console.warn("Can't pass pack in phase", state.ui.phase);
     }
@@ -260,6 +292,7 @@ function handleMessage(message: ServerMessage) {
             terminate("Server error: " + message.value);
             break;
         case "Pack":
+            moveToPhase(Phase.Draft);
             receivedPack(message.value);
             break;
         case "Passed":

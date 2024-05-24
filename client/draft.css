@@ -1,3 +1,7 @@
+.container {
+    position: relative;
+}
+
 .floating-centered {
     position: absolute;
     top: 50%;
@@ -11,4 +15,13 @@
 
 .padded {
     padding: 1rem;
+}
+
+.pack-card-grid {
+}
+
+.pack-card-image {
+    object-fit: contain;
+    width: 63.5mm;
+    height: 88.9mm;
 }
