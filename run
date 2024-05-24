@@ -11,9 +11,13 @@ _cargo() {
         --manifest-path "$ROOT/server/Cargo.toml" "${@:2}"
 }
 
-content() {
+content-cp() {
     mkdir -p "$CONTENT"
     cp "client/"*".html" "client/"*".css" "$CONTENT/"
+}
+
+content() {
+    content-cp
     tsc --outDir "$CONTENT/" --lib "es2015,dom" "$ROOT/client/"*".ts"
 }
 

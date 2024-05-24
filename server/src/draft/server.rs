@@ -48,9 +48,14 @@ pub enum ServerMessage {
         pool: Vec<Card>,
         pack: Option<Vec<Card>>,
     },
+
+    /// Client sent us a message that doesn't make sense, their state must be
+    /// messed up. Tell them to refresh.
+    Refresh,
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum ClientMessage {
     HeartBeat,
     ReadyState(bool),
@@ -261,6 +266,8 @@ impl DraftServer {
                             // desynced? Resend current pack.
                             client.send(ServerMessage::Pack(pack));
                         }
+                    } else {
+                        client.send(ServerMessage::Refresh);
                     }
                 }
             }

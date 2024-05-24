@@ -17,11 +17,13 @@
     padding: 1rem;
 }
 
-.pack-card-grid {
+.pack-card {
+    display: inline-block;
+    object-fit: contain;
+    aspect-ratio: 5 / 7;
+    padding: 0.5rem;
 }
 
-.pack-card-image {
-    object-fit: contain;
-    width: 63.5mm;
-    height: 88.9mm;
+.pack-card.selected {
+    border: 2px solid yellowgreen;
 }

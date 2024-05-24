@@ -32,7 +32,14 @@ type ServerMessage =
             pool: Card[],
             pack?: Card[],
         }
-    };
+    } | { type: "Refresh" };
+
+type ClientMessage =
+    { type: "HeartBeat" }
+    | { type: "ReadyState", value: boolean }
+    | { type: "Disconnected" }
+    | { type: "SetName", value: string }
+    | { type: "Pick", value: number };
 
 enum Phase {
     Connecting,
@@ -42,13 +49,13 @@ enum Phase {
     Terminated,
 }
 
-type UiState = 
+type UiState =
     { phase: Phase.Connecting }
     | {
         phase: Phase.Lobby,
         updatePlayerList: (players: PlayerList) => void,
     }
-    | { 
+    | {
         phase: Phase.Draft,
         receivePack: (pack: Card[]) => void,
         passedPack: () => void,
@@ -67,13 +74,30 @@ type UiState =
 
 type State = {
     ui: UiState,
+    socket: WebSocket | null,
     reconnectAttempts: number,
 };
 
 let state: State = {
     ui: { phase: Phase.Connecting },
+    socket: null,
     reconnectAttempts: 0,
 };
+
+/**
+ * Send a message throug the websocket to the server, if the websocket is open.
+ * @param message Message to send on the socket to the server.
+ * @returns true if the socket was open and the message sent, else false.
+ */
+function sendMessage(message: ClientMessage): boolean {
+    if (state.socket == null) {
+        console.warn("Not sending message as socket not available.", message);
+        return false;
+    }
+
+    state.socket.send(JSON.stringify(message));
+    return true;
+}
 
 function phaseRootElement(phase: Phase): HTMLElement {
     switch (phase) {
@@ -121,6 +145,11 @@ function attr(element: HTMLElement, key: string, value: string): HTMLElement {
     return element;
 }
 
+function forEachEl(selector: string, callback: (e: HTMLElement) => void) {
+    document.querySelectorAll(selector)
+        .forEach(el => callback(el as HTMLElement));
+}
+
 function setUpLobby(root: HTMLElement): UiState {
     let float = classes(el("div", root), "floating-centered", "simple-border");
     let table = classes(el("table", float), "padded");
@@ -150,29 +179,71 @@ function setUpLobby(root: HTMLElement): UiState {
     };
 }
 
+function populatePack(root: HTMLElement, cards: Card[]) {
+    root.innerHTML = "";
+    if (cards.length == 0) {
+        text(classes(el("div", root), "floating-centered"), "Empty pack.");
+    }
+
+    let index = 0;
+    cards.forEach(card => {
+        let img = el("img", root);
+        attr(img, "src", card.image);
+        attr(img, "data-index", String(index));
+        classes(img, "pack-card");
+
+        img.onclick = () => {
+            if (img.classList.contains("selected")) {
+                if (img.dataset.index === undefined) {
+                    console.error("Card with no index. Can't pick.", img);
+                    return;
+                }
+                sendMessage({
+                    type: "Pick",
+                    value: parseInt(img.dataset.index)
+                });
+            } else {
+                forEachEl(
+                    ".pack-card.selected",
+                    card => card.classList.remove("selected")
+                );
+                img.classList.add("selected");
+            }
+        };
+
+        index++;
+    });
+}
+
 function setUpDraft(root: HTMLElement): UiState {
     let float = el("div", root);
     let header = classes(el("div", float), "container");
-    let pack = classes(el("div", float), "container", "pack-card-grid");
+    let pack = classes(el("div", float), "container");
     let pool = classes(el("div", float), "container");
 
     // TODO implement header with player list, other info
     text(classes(el("div", header), "floating-centered"), "Header");
+    let widthBox = el("span", header);
+    text(el("span", widthBox), "Card size");
+    let width = el("input", widthBox) as HTMLInputElement;
+    attr(width, "type", "range")
+    attr(width, "min", "40");
+    attr(width, "max", "400");
+    attr(width, "value", "128");
+
+    const updateCardWidths = () => {
+        let w = width.value + "px";
+        forEachEl(".pack-card", card => card.style.width = w);
+    };
+
+    width.oninput = () => updateCardWidths();
 
     // TODO implement pool element with picked cards
     text(classes(el("div", pool), "floating-centered"), "Picked cards.");
 
     const receivePack = (cards: Card[]) => {
-        pack.innerHTML = "";
-        if (cards.length == 0) {
-            text(classes(el("div", pack), "floating-centered"), "Empty pack.");
-        }
-
-        cards.forEach(card => {
-            let img = el("img", classes(el("span", pack), "padded"));
-            attr(img, "src", card.image);
-            classes(img, "pack-card-image");
-        });
+        populatePack(pack, cards);
+        updateCardWidths();
     };
 
     const passedPack = () => {
@@ -316,6 +387,9 @@ function handleMessage(message: ServerMessage) {
                 receivedPack(message.value.pack);
             }
             break;
+        case "Refresh":
+            location.href = location.href;
+            break;
     }
 }
 
@@ -359,10 +433,12 @@ function openWebsocket(draftId: string) {
     ws.onopen = e => {
         console.log("Websocket opened.");
         state.reconnectAttempts = 0;
+        state.socket = ws;
     };
     ws.onmessage = e => {
         e.data.text().then((json: string) => handleMessage(JSON.parse(json)));
     };
+    ws.onclose = e => { state.socket = null; };
     ws.onerror = e => {
         console.error("Websocket error:", e);
         if (state.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
