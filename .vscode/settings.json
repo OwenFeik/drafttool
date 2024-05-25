@@ -10,5 +10,8 @@
         "editor.formatOnSave": false,
         "editor.tabSize": 2,
     },
-    "typescript.preferences.autoImportFileExcludePatterns": ["*.js"]
+    "typescript.preferences.autoImportFileExcludePatterns": [
+        "*.js"
+    ],
+    "nixEnvSelector.nixFile": "${workspaceRoot}/shell.nix"
 }

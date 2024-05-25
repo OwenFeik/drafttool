@@ -73,12 +73,16 @@ type UiState =
     };
 
 type State = {
+    draft: string | null,
+    seat: string | null,
     ui: UiState,
     socket: WebSocket | null,
     reconnectAttempts: number,
 };
 
 let state: State = {
+    draft: null,
+    seat: null,
     ui: { phase: Phase.Connecting },
     socket: null,
     reconnectAttempts: 0,
@@ -130,7 +134,12 @@ function el(tag: string, parent?: HTMLElement): HTMLElement {
     return element;
 }
 
-function classes(element: HTMLElement, ...classes: string[]): HTMLElement {
+function checkbox(parent?: HTMLElement): HTMLInputElement {
+    let element = attr(el("input", parent), "type", "checkbox");
+    return element as HTMLInputElement;
+}
+
+function classes<E extends HTMLElement>(element: E, ...classes: string[]): E {
     element.classList.add(...classes);
     return element;
 }
@@ -140,8 +149,12 @@ function text(element: HTMLElement, text: string): HTMLElement {
     return element;
 }
 
-function attr(element: HTMLElement, key: string, value: string): HTMLElement {
-    element.setAttribute(key, value);
+function attr(element: HTMLElement, key: string, value?: string): HTMLElement {
+    if (value !== undefined) {
+        element.setAttribute(key, value);
+    } else {
+        element.toggleAttribute(key, true);
+    }
     return element;
 }
 
@@ -163,13 +176,20 @@ function setUpLobby(root: HTMLElement): UiState {
         playerList.innerHTML = "";
         players.forEach(player => {
             let [id, name] = player;
-            let row = el("tr", playerList);
-            text(el("td", row), "status");
-            text(el("td", row), name != "" ? name : "No name");
-            text(el("td", row), "ready");
+            name = name != "" ? name : "No name";
 
-            // TODO item for this player should have a button to ready up
-            // TODO each player should have a connection state and a ready state
+            let row = attr(el("tr", playerList), "data-player", id);
+            classes(text(el("td", row), "status"), "player-status");
+            classes(text(el("td", row), name), "player-name");
+            let ready = classes(checkbox(el("td", row)), "player-ready");
+            
+            if (id == state.seat) {
+                ready.oninput = () => sendMessage(
+                    { type: "ReadyState", value: ready.checked }
+                );
+            } else {
+                attr(ready, "disabled");
+            }
         });
     };
 
@@ -351,6 +371,12 @@ function updatePlayerList(playerList: PlayerList) {
     }
 }
 
+function updateDraftSeat(draft: string, seat: string) {
+    state.draft = draft;
+    state.seat = seat;
+    seatToLocalStorage(draft, seat);
+}
+
 function handleMessage(message: ServerMessage) {
     switch (message.type) {
         case "Started":
@@ -375,13 +401,13 @@ function handleMessage(message: ServerMessage) {
             break;
         case "Connected":
             moveToPhase(Phase.Lobby);
-            seatToLocalStorage(message.value.draft, message.value.seat);
+            updateDraftSeat(message.value.draft, message.value.seat);
             updatePlayerList(message.value.players);
             break;
         case "Reconnected":
             let draft_in_progress = message.value.in_progress;
             moveToPhase(draft_in_progress ? Phase.Draft : Phase.Finished);
-            seatToLocalStorage(message.value.draft, message.value.seat);
+            updateDraftSeat(message.value.draft, message.value.seat);
             updatePool(message.value.pool);
             if (message.value.pack) {
                 receivedPack(message.value.pack);

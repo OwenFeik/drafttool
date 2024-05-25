@@ -223,16 +223,6 @@ impl DraftServer {
         } else {
             chan.send(ServerMessage::Started).ok();
         }
-
-        // TODO remove this; just sends a pack to the client immediately, for
-        // debugging purposes.
-        if let Phase::Lobby(readys, config, pool) = &self.phase {
-            if let Ok(Some(pack)) =
-                make_packs(1, config, pool.clone()).map(|ps| ps.into_iter().next())
-            {
-                self.send_to(id, ServerMessage::Pack(pack));
-            }
-        }
     }
 
     fn handle_client_message(&mut self, id: Uuid, msg: ClientMessage) {

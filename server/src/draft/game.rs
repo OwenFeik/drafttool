@@ -69,17 +69,6 @@ impl Draft {
         let (card, pack) = self.pick_card(player, index)?;
         self.pool_for(player).push(card);
 
-        // If the draft is complete, there is no new packs. Return an empty vec
-        // to indicate success.
-        if self.draft_complete() {
-            return Some(Vec::new());
-        }
-
-        // If this was the last pick in the round, begin the next.
-        if self.round_finished() {
-            return Some(self.start_round());
-        }
-
         let mut newly_available_packs = Vec::new();
         if !pack.is_empty()
             && let Some(next_player) = self.next_player(player)
@@ -99,7 +88,13 @@ impl Draft {
         {
             newly_available_packs.push((player, next_pack));
         }
-        Some(newly_available_packs)
+
+        // If this was the last pick in the round, begin the next.
+        if newly_available_packs.is_empty() && self.round_finished() && !self.draft_complete() {
+            Some(self.start_round())
+        } else {
+            Some(newly_available_packs)
+        }
     }
 
     /// Get the pack currently being drafted by this player, if any.
@@ -372,5 +367,27 @@ mod test {
             .iter()
             .all(|&player| draft.drafted_cards(player).unwrap().len()
                 == config.rounds * config.cards_per_pack));
+    }
+
+    #[test]
+    fn test_single_player() {
+        let p = Uuid::new_v4();
+
+        let config = &DraftConfig {
+            rounds: 1,
+            cards_per_pack: 4,
+            unique_cards: false,
+            rares: 1,
+            uncommons: 1,
+            commons: 2,
+            ..Default::default()
+        };
+        let pool = DraftPool::sample(1, 1, 1, 1);
+        let packs = make_packs(1, config, pool).unwrap();
+        let mut draft = Draft::new(vec![p], 1, packs);
+
+        assert!(draft.begin().len() == 1);
+        assert!(draft.handle_pick(p, 0).unwrap().len() == 1);
+        assert!(!draft.draft_complete());
     }
 }
