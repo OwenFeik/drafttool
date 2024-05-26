@@ -28,7 +28,7 @@ pub enum ServerMessage {
     Pack(Pack), // TODO this should include an ID to handle out of order events
 
     /// Pick was successful, current pack has been passed on.
-    Passed,
+    PickSuccessful(Card),
 
     /// Draft finished, here's your final pool.
     Finished(Vec<Card>),
@@ -247,8 +247,8 @@ impl DraftServer {
                 }
                 ClientMessage::Pick(index) => {
                     if let Phase::Draft(draft) = &mut self.phase {
-                        if let Some(packs) = draft.handle_pick(id, index) {
-                            client.send(ServerMessage::Passed);
+                        if let Ok((card, packs)) = draft.handle_pick(id, index) {
+                            client.send(ServerMessage::PickSuccessful(card));
                             self.send_packs(packs);
                             self.finish_if_done();
                         } else if let Some(pack) = draft.current_pack(id) {
@@ -392,18 +392,18 @@ mod test {
         // Client one passes, don't expect any packs at this stage as they are
         // backed up behind p2.
         client_send(&handle, p1, ClientMessage::Pick(0));
-        assert_matches!(receive(&mut chan1).await, ServerMessage::Passed);
+        assert_matches!(receive(&mut chan1).await, ServerMessage::PickSuccessful(_));
 
         // After p2s pick, both players should be sent a new pack.
         client_send(&handle, p2, ClientMessage::Pick(0));
-        assert_matches!(receive(&mut chan2).await, ServerMessage::Passed);
+        assert_matches!(receive(&mut chan2).await, ServerMessage::PickSuccessful(_));
         assert_matches!(receive(&mut chan2).await, ServerMessage::Pack(..));
         assert_matches!(receive(&mut chan1).await, ServerMessage::Pack(..));
 
         client_send(&handle, p1, ClientMessage::Pick(0));
-        assert_matches!(receive(&mut chan1).await, ServerMessage::Passed);
+        assert_matches!(receive(&mut chan1).await, ServerMessage::PickSuccessful(_));
         client_send(&handle, p2, ClientMessage::Pick(0));
-        assert_matches!(receive(&mut chan2).await, ServerMessage::Passed);
+        assert_matches!(receive(&mut chan2).await, ServerMessage::PickSuccessful(_));
 
         assert_matches!(receive(&mut chan1).await, ServerMessage::Finished(cards) if cards.len() == 2);
         assert_matches!(receive(&mut chan2).await, ServerMessage::Finished(cards) if cards.len() == 2);

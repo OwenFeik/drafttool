@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use uuid::Uuid;
 
-use crate::cards::Card;
+use crate::{cards::Card, err, Res};
 
 use super::packs::Pack;
 
@@ -20,6 +20,8 @@ impl PassDirection {
         }
     }
 }
+
+pub type NewPacks = Vec<(Uuid, Pack)>;
 
 pub struct Draft {
     players: Vec<Uuid>,
@@ -65,13 +67,14 @@ impl Draft {
     /// the picking player if they have a new pack available to pick from and
     /// one will be produced for the player next in the draft after the picking
     /// player if the pack the picking player is passing is not empty.
-    pub fn handle_pick(&mut self, player: Uuid, index: usize) -> Option<Vec<(Uuid, Vec<Card>)>> {
+    pub fn handle_pick(&mut self, player: Uuid, index: usize) -> Res<(Card, NewPacks)> {
         let (card, pack) = self.pick_card(player, index)?;
-        self.pool_for(player).push(card);
+        self.pool_for(player).push(card.clone());
 
         let mut newly_available_packs = Vec::new();
+        let next = self.next_player(player);
         if !pack.is_empty()
-            && let Some(next_player) = self.next_player(player)
+            && let Some(next_player) = next
         {
             self.stack_for(next_player).push_back(pack);
             if let Some(next_player_stack) = self.packs_being_drafted.get(&next_player)
@@ -81,19 +84,20 @@ impl Draft {
                     .push((next_player, next_player_stack.front().cloned().unwrap()));
             }
         }
-        if let Some(next_pack) = self
-            .packs_being_drafted
-            .get(&player)
-            .and_then(|stack| stack.front().cloned())
+        if next != Some(player)
+            && let Some(next_pack) = self
+                .packs_being_drafted
+                .get(&player)
+                .and_then(|stack| stack.front().cloned())
         {
             newly_available_packs.push((player, next_pack));
         }
 
         // If this was the last pick in the round, begin the next.
         if newly_available_packs.is_empty() && self.round_finished() && !self.draft_complete() {
-            Some(self.start_round())
+            Ok((card, self.start_round()))
         } else {
-            Some(newly_available_packs)
+            Ok((card, newly_available_packs))
         }
     }
 
@@ -198,21 +202,25 @@ impl Draft {
     /// current pack. On success returns the picked card and the pack (now
     /// removed from the players pack stack). On failure (if the player has no
     /// active pack or the index is invalid) returns None.
-    fn pick_card(&mut self, player: Uuid, index: usize) -> Option<(Card, Pack)> {
-        let pack_stack = self.packs_being_drafted.get_mut(&player)?;
-        let current_pack = pack_stack.front_mut()?;
-        let card = if index < current_pack.len() {
-            current_pack.remove(index)
-        } else {
-            return None; // Invalid pick index.
+    fn pick_card(&mut self, player: Uuid, index: usize) -> Res<(Card, Pack)> {
+        let Some(pack_stack) = self.packs_being_drafted.get_mut(&player) else {
+            return err("Player not in draft.");
         };
-
-        Some((card, pack_stack.pop_front().unwrap()))
+        let Some(current_pack) = pack_stack.front_mut() else {
+            return err("No current pack.");
+        };
+        if index < current_pack.len() {
+            Ok((current_pack.remove(index), pack_stack.pop_front().unwrap()))
+        } else {
+            err("Invalid pick index.")
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::assert_matches::assert_matches;
+
     use uuid::Uuid;
 
     use crate::draft::{
@@ -294,32 +302,32 @@ mod test {
             .any(|(pack_player, _)| pack_player == player)));
 
         // Pick at invalid index should fail.
-        assert!(draft.handle_pick(p1, config.cards_per_pack).is_none());
+        assert!(draft.handle_pick(p1, config.cards_per_pack).is_err());
         // Pick from a player who is not in the draft should fail.
-        assert!(draft.handle_pick(Uuid::new_v4(), 0).is_none());
+        assert!(draft.handle_pick(Uuid::new_v4(), 0).is_err());
         // There are no packs waiting and the next player already has a pack.
-        assert!(draft.handle_pick(p1, 0).unwrap().is_empty());
-        assert!(draft.handle_pick(p3, 5).unwrap().is_empty());
+        assert!(draft.handle_pick(p1, 0).unwrap().1.is_empty());
+        assert!(draft.handle_pick(p3, 5).unwrap().1.is_empty());
 
         // No pack available, should be rejected.
-        assert!(draft.handle_pick(p1, 0).is_none());
+        assert!(draft.handle_pick(p1, 0).is_err());
 
         // When player two makes a pick, we should have 2 updates. Player 2
         // should have a pack available as player 3 has already picked and
         // player 1 now has a pack available.
-        let updates = draft.handle_pick(p2, 10).unwrap();
+        let updates = draft.handle_pick(p2, 10).unwrap().1;
         assert!(updates.len() == 2);
         assert!(updates.iter().any(|(player, _)| *player == p1));
         assert!(updates.iter().any(|(player, _)| *player == p2));
         assert!(updates
             .iter()
             .all(|(_, pack)| pack.len() == config.cards_per_pack - 1));
-        assert!(draft.handle_pick(p4, 14).unwrap().len() == 2);
+        assert!(draft.handle_pick(p4, 14).unwrap().1.len() == 2);
 
         // Pick all but 1 of the rest of the cards.
         for _ in 0..(config.cards_per_pack - 2) {
             for &player in &players {
-                draft.handle_pick(player, 0);
+                assert!(draft.handle_pick(player, 0).is_ok());
             }
         }
 
@@ -328,33 +336,34 @@ mod test {
             .iter()
             .all(|&player| draft.current_pack(player).unwrap().len() == 1
                 && draft.drafted_cards(player).unwrap().len() == 14));
-        assert!(draft.handle_pick(p1, 1).is_none());
-        draft.handle_pick(p1, 0);
-        draft.handle_pick(p2, 0);
-        draft.handle_pick(p3, 0);
+        assert!(draft.handle_pick(p1, 1).is_err());
+        assert!(draft.handle_pick(p1, 0).is_ok());
+        assert!(draft.handle_pick(p2, 0).is_ok());
+        assert!(draft.handle_pick(p3, 0).is_ok());
 
         // Final pick for p4 is the final pick of the round. The new round
         // should begin.
-        let updates = draft.handle_pick(p4, 0).unwrap();
+        let updates = draft.handle_pick(p4, 0).unwrap().1;
         assert!(updates.len() == 4);
         assert!(players
             .iter()
             .all(|player| updates.iter().any(|(pack_player, _)| player == pack_player)));
 
         // Passing should be in the opposite direction now.
-        assert!(draft.handle_pick(p1, 0).unwrap().is_empty());
+        assert!(draft.handle_pick(p1, 0).unwrap().1.is_empty());
         assert!(draft
             .handle_pick(p4, 0)
             .unwrap()
+            .1
             .into_iter()
             .any(|(pack_player, _)| pack_player == p1));
-        assert!(!draft.handle_pick(p2, 0).unwrap().is_empty());
-        assert!(!draft.handle_pick(p3, 0).unwrap().is_empty());
+        assert!(!draft.handle_pick(p2, 0).unwrap().1.is_empty());
+        assert!(!draft.handle_pick(p3, 0).unwrap().1.is_empty());
 
         // Complete pack 2 and pack 3.
         for _ in 0..(config.cards_per_pack * 2 - 1) {
             for &player in &players {
-                draft.handle_pick(player, 0);
+                assert!(draft.handle_pick(player, 0).is_ok());
             }
         }
 
@@ -362,7 +371,7 @@ mod test {
         // players having drafted the appropriate number of cards.
         assert!(draft.draft_complete());
         assert!(draft.generated_packs.is_empty());
-        assert!(draft.handle_pick(p1, 0).is_none());
+        assert!(draft.handle_pick(p1, 0).is_err());
         assert!(players
             .iter()
             .all(|&player| draft.drafted_cards(player).unwrap().len()
@@ -387,7 +396,10 @@ mod test {
         let mut draft = Draft::new(vec![p], 1, packs);
 
         assert!(draft.begin().len() == 1);
-        assert!(draft.handle_pick(p, 0).unwrap().len() == 1);
+
+        let result = draft.handle_pick(p, 0);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().1.len(), 1);
         assert!(!draft.draft_complete());
     }
 }

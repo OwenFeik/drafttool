@@ -1,5 +1,22 @@
+html {
+    --simple-border: 1px solid black;
+    --pad-one: 1rem;
+    --pad-half: 0.5rem;
+}
+
 .container {
+    margin: var(--pad-one);
     position: relative;
+}
+
+.container-heading {
+    border-bottom: var(--simple-border);
+    padding: var(--pad-half);
+    text-align: center;
+}
+
+.container-heading:only-child {
+    border-bottom: none;
 }
 
 .floating-centered {
@@ -10,20 +27,21 @@
 }
 
 .simple-border {
-    border: 1px solid black;
+    border: var(--simple-border);
 }
 
 .padded {
-    padding: 1rem;
+    padding: var(--pad-one);
 }
 
-.pack-card {
+.card {
+    aspect-ratio: 5 / 7;
+    box-sizing: border-box;
     display: inline-block;
     object-fit: contain;
-    aspect-ratio: 5 / 7;
-    padding: 0.5rem;
+    padding: var(--pad-half);
 }
 
-.pack-card.selected {
+.card.selected {
     border: 2px solid yellowgreen;
 }

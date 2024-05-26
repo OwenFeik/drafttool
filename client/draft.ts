@@ -1,3 +1,8 @@
+enum Classes {
+    Card = "card",
+    Selected = "selected",
+}
+
 type Card = {
     name: string,
     image: string,
@@ -13,7 +18,7 @@ type ServerMessage =
     | { type: "Ended" }
     | { type: "FatalError", value: string }
     | { type: "Pack", "value": Card[] }
-    | { type: "Passed" }
+    | { type: "PickSuccessful", "value": Card }
     | { type: "Finished", value: Card[] }
     | {
         type: "Connected",
@@ -58,7 +63,7 @@ type UiState =
     | {
         phase: Phase.Draft,
         receivePack: (pack: Card[]) => void,
-        passedPack: () => void,
+        pickSuccessful: (picked: Card) => void,
         updatePlayerList: (players: PlayerList) => void,
         updatePool: (pool: Card[]) => void,
     }
@@ -139,6 +144,13 @@ function checkbox(parent?: HTMLElement): HTMLInputElement {
     return element as HTMLInputElement;
 }
 
+function heading(parent: HTMLElement, content: string): HTMLElement {
+    return text(
+        classes(el("div", parent), "container-heading"),
+        content
+    );
+}
+
 function classes<E extends HTMLElement>(element: E, ...classes: string[]): E {
     element.classList.add(...classes);
     return element;
@@ -182,7 +194,7 @@ function setUpLobby(root: HTMLElement): UiState {
             classes(text(el("td", row), "status"), "player-status");
             classes(text(el("td", row), name), "player-name");
             let ready = classes(checkbox(el("td", row)), "player-ready");
-            
+
             if (id == state.seat) {
                 ready.oninput = () => sendMessage(
                     { type: "ReadyState", value: ready.checked }
@@ -199,93 +211,134 @@ function setUpLobby(root: HTMLElement): UiState {
     };
 }
 
+function renderCard(root: HTMLElement, card: Card): HTMLElement {
+    let img = el("img", root);
+    attr(img, "src", card.image);
+    classes(img, Classes.Card);
+    return img;
+}
+
+function renderCardList(root: HTMLElement, cards: Card[]) {
+    let index = 0;
+    cards.forEach(card => attr(
+        renderCard(root, card),
+        "data-index",
+        String(index++)
+    ));
+}
+
 function populatePack(root: HTMLElement, cards: Card[]) {
     root.innerHTML = "";
     if (cards.length == 0) {
-        text(classes(el("div", root), "floating-centered"), "Empty pack.");
+        heading(root, "Waiting for pack");
+        return;
     }
 
-    let index = 0;
-    cards.forEach(card => {
-        let img = el("img", root);
-        attr(img, "src", card.image);
-        attr(img, "data-index", String(index));
-        classes(img, "pack-card");
-
-        img.onclick = () => {
-            if (img.classList.contains("selected")) {
-                if (img.dataset.index === undefined) {
-                    console.error("Card with no index. Can't pick.", img);
-                    return;
-                }
-                sendMessage({
-                    type: "Pick",
-                    value: parseInt(img.dataset.index)
-                });
-            } else {
-                forEachEl(
-                    ".pack-card.selected",
-                    card => card.classList.remove("selected")
-                );
-                img.classList.add("selected");
+    heading(root, "Current pack");
+    renderCardList(root, cards);
+    forEachEl(`.${Classes.Card}`, img => img.onclick = e => {
+        if (img.classList.contains(Classes.Selected)) {
+            if (img.dataset.index === undefined) {
+                console.error("Card with no index. Can't pick.", img);
+                return;
             }
-        };
-
-        index++;
+            sendMessage({
+                type: "Pick",
+                value: parseInt(img.dataset.index)
+            });
+        } else {
+            forEachEl(
+                `.${Classes.Card}.${Classes.Selected}`,
+                card => card.classList.remove(Classes.Selected)
+            );
+            img.classList.add(Classes.Selected);
+        }
+        e.stopPropagation();
     });
 }
 
-function setUpDraft(root: HTMLElement): UiState {
-    let float = el("div", root);
-    let header = classes(el("div", float), "container");
-    let pack = classes(el("div", float), "container");
-    let pool = classes(el("div", float), "container");
-
-    // TODO implement header with player list, other info
-    text(classes(el("div", header), "floating-centered"), "Header");
-    let widthBox = el("span", header);
+function renderCardWidthSelector(root: HTMLElement): (() => void) {
+    let widthBox = el("span", root);
     text(el("span", widthBox), "Card size");
     let width = el("input", widthBox) as HTMLInputElement;
     attr(width, "type", "range")
     attr(width, "min", "40");
     attr(width, "max", "400");
-    attr(width, "value", "128");
+    attr(width, "value", "200");
 
     const updateCardWidths = () => {
         let w = width.value + "px";
-        forEachEl(".pack-card", card => card.style.width = w);
+        forEachEl(".card", card => card.style.width = w);
     };
-
     width.oninput = () => updateCardWidths();
+    return updateCardWidths;
+}
 
-    // TODO implement pool element with picked cards
-    text(classes(el("div", pool), "floating-centered"), "Picked cards.");
+function setUpDraft(root: HTMLElement): UiState {
+    let float = el("div", root);
+    let header = classes(el("div", float), "container", "simple-border");
+    heading(header, "Draft in progress");
+    let pack = classes(el("div", float), "container", "simple-border");
+    let pool = classes(el("div", float), "container", "simple-border");
+
+    // TODO implement player list
+    const updateCardWidths = renderCardWidthSelector(header);
+
+    pack.onclick = () => {
+        forEachEl(
+            `.${Classes.Card}.${Classes.Selected}`,
+            card => card.classList.remove(Classes.Selected)
+        );
+    };
 
     const receivePack = (cards: Card[]) => {
         populatePack(pack, cards);
         updateCardWidths();
     };
 
-    const passedPack = () => {
+    const pickSuccessful = (card: Card) => {
         pack.innerHTML = "";
-        text(
-            classes(el("div", pack), "floating-centered"),
-            "Waiting for pack."
-        );
+        heading(pack, "Waiting for pack");
+        renderCard(pool, card);
+        updateCardWidths();
+    };
+
+    const updatePool = (cards: Card[]) => {
+        pool.innerHTML = "";
+        heading(pool, "Picked cards");
+        renderCardList(pool, cards);
+        updateCardWidths();
     };
 
     return {
         phase: Phase.Draft,
         receivePack,
-        passedPack,
+        pickSuccessful,
         updatePlayerList: null!, // TODO
-        updatePool: null!,       // TODO
+        updatePool,
     };
 }
 
 function setUpFinished(root: HTMLElement): UiState {
-    // TODO set up post-draft pool view. Deck builder?
-    return null!;
+    let float = el("div", root);
+    let header = classes(el("div", float), "container", "simple-border");
+    heading(header, "Draft complete");
+    let pool = classes(el("div", float), "container", "simple-border");
+
+    const updateCardWidths = renderCardWidthSelector(header);
+
+    const updatePool = (cards: Card[]) => {
+        pool.innerHTML = "";
+        heading(pool, "Picked cards");
+        renderCardList(pool, cards);
+        updateCardWidths();
+    };
+
+    return {
+        phase: Phase.Finished,
+        updatePlayerList: null!, // TODO
+        updatePool,
+    };
 }
 
 function setUpTerminated(root: HTMLElement): UiState {
@@ -342,9 +395,9 @@ function receivedPack(pack: Card[]) {
     }
 }
 
-function passedPack() {
+function pickSuccessful(picked: Card) {
     if (state.ui.phase == Phase.Draft) {
-        state.ui.passedPack();
+        state.ui.pickSuccessful(picked);
     } else {
         console.warn("Can't pass pack in phase", state.ui.phase);
     }
@@ -392,8 +445,8 @@ function handleMessage(message: ServerMessage) {
             moveToPhase(Phase.Draft);
             receivedPack(message.value);
             break;
-        case "Passed":
-            passedPack();
+        case "PickSuccessful":
+            pickSuccessful(message.value);
             break;
         case "Finished":
             moveToPhase(Phase.Finished);
@@ -409,9 +462,7 @@ function handleMessage(message: ServerMessage) {
             moveToPhase(draft_in_progress ? Phase.Draft : Phase.Finished);
             updateDraftSeat(message.value.draft, message.value.seat);
             updatePool(message.value.pool);
-            if (message.value.pack) {
-                receivedPack(message.value.pack);
-            }
+            receivedPack(message.value.pack ? message.value.pack : []);
             break;
         case "Refresh":
             location.href = location.href;
