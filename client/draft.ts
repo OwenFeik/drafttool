@@ -1,5 +1,8 @@
-enum Classes {
+enum Css {
     Card = "card",
+    Center = "center",
+    Hide = "hide",
+    Label = "label",
     Selected = "selected",
 }
 
@@ -11,7 +14,16 @@ type Card = {
     text: string
 };
 
-type PlayerList = [string, string][];
+type Status = "Ok" | "Warning" | "Error";
+
+type PlayerDetails = {
+    seat: string,
+    name: string,
+    ready: boolean,
+    status: Status,
+};
+
+type PlayerList = PlayerDetails[];
 
 type ServerMessage =
     { type: "Started" }
@@ -25,7 +37,6 @@ type ServerMessage =
         value: {
             draft: string,
             seat: string,
-            players: PlayerList,
         }
     }
     | {
@@ -37,7 +48,14 @@ type ServerMessage =
             pool: Card[],
             pack?: Card[],
         }
-    } | { type: "Refresh" };
+    } | { type: "Refresh" }
+    | {
+        type: "PlayerUpdate",
+        value: PlayerDetails,
+    } | {
+        type: "PlayerList",
+        value: PlayerList
+    };
 
 type ClientMessage =
     { type: "HeartBeat" }
@@ -59,17 +77,20 @@ type UiState =
     | {
         phase: Phase.Lobby,
         updatePlayerList: (players: PlayerList) => void,
+        updatePlayerDetails: (details: PlayerDetails) => void,
     }
     | {
         phase: Phase.Draft,
         receivePack: (pack: Card[]) => void,
         pickSuccessful: (picked: Card) => void,
         updatePlayerList: (players: PlayerList) => void,
+        updatePlayerDetails: (details: PlayerDetails) => void,
         updatePool: (pool: Card[]) => void,
     }
     | {
         phase: Phase.Finished,
         updatePlayerList: (players: PlayerList) => void,
+        updatePlayerDetails: (details: PlayerDetails) => void,
         updatePool: (pool: Card[]) => void,
     }
     | {
@@ -139,9 +160,13 @@ function el(tag: string, parent?: HTMLElement): HTMLElement {
     return element;
 }
 
-function checkbox(parent?: HTMLElement): HTMLInputElement {
-    let element = attr(el("input", parent), "type", "checkbox");
+function input(type: string, parent?: HTMLElement): HTMLInputElement {
+    let element = attr(el("input", parent), "type", type);
     return element as HTMLInputElement;
+}
+
+function checkbox(parent?: HTMLElement): HTMLInputElement {
+    return input("checkbox", parent);
 }
 
 function heading(parent: HTMLElement, content: string): HTMLElement {
@@ -175,46 +200,186 @@ function forEachEl(selector: string, callback: (e: HTMLElement) => void) {
         .forEach(el => callback(el as HTMLElement));
 }
 
+function toggleInput(
+    parent: HTMLElement,
+    initialValue: string,
+    validate: (s: string) => string | true,
+    onValidInput: (s: string) => void
+): HTMLInputElement {
+    let root = el("span", parent);
+    let inp = classes(input("text", root), Css.Hide);
+    inp.value = initialValue;
+    let label = classes(text(el("span", root), initialValue), "label");
+    let edit = classes(text(el("a", root), "[edit]"), "link-button");
+    let save = classes(text(el("a", root), "[save]"), "link-button", Css.Hide);
+    let cancel = text(el("a", root), "[cancel]");
+    classes(cancel, "link-button", Css.Hide);
+
+    edit.onclick = () => {
+        inp.classList.remove(Css.Hide);
+        edit.classList.add(Css.Hide);
+        label.classList.add(Css.Hide);
+        save.classList.remove(Css.Hide);
+        cancel.classList.remove(Css.Hide);
+
+        inp.focus();
+    };
+
+    save.onclick = () => {
+        let result = validate(inp.value);
+        if (typeof result === "string") {
+            inp.setCustomValidity(result);
+        } else {
+            inp.setCustomValidity("");
+        }
+
+        if (inp.validity.valid) {
+            label.innerText = inp.value;
+            inp.classList.add(Css.Hide);
+            edit.classList.remove(Css.Hide);
+            label.classList.remove(Css.Hide);
+            save.classList.add(Css.Hide);
+            cancel.classList.add(Css.Hide);
+            onValidInput(inp.value);
+        }
+    };
+
+    cancel.onclick = () => {
+        inp.classList.add(Css.Hide);
+        edit.classList.remove(Css.Hide);
+        label.classList.remove(Css.Hide);
+        save.classList.add(Css.Hide);
+        cancel.classList.add(Css.Hide);
+    };
+
+    return inp;
+}
+
+function updateStatusIndicator(element: HTMLElement, status: Status) {
+    element.classList.remove("ok", "warn", "err");
+    element.classList.add(
+        status == "Warning" ? "warn"
+            : status == "Error" ? "err"
+                : "ok"
+    );
+}
+
+type UiPlayerList = {
+    players: Map<string, {
+        nameLabel: HTMLElement,
+        nameInput?: HTMLInputElement,
+        status: HTMLElement,
+        ready: HTMLInputElement,
+    }>
+};
+
 function setUpLobby(root: HTMLElement): UiState {
     let float = classes(el("div", root), "floating-centered", "simple-border");
     let table = classes(el("table", float), "padded");
     let headrow = el("tr", el("thead", table));
-    text(el("td", headrow), "Status");
-    text(el("td", headrow), "User");
-    text(el("td", headrow), "Ready");
+    text(el("th", headrow), "Status");
+    text(el("th", headrow), "User");
+    text(el("th", headrow), "Ready");
+
+    let lobbyState: UiPlayerList = {
+        players: new Map()
+    };
 
     let playerList = el("tbody", table);
     const updatePlayerList = (players: PlayerList) => {
         playerList.innerHTML = "";
-        players.forEach(player => {
-            let [id, name] = player;
-            name = name != "" ? name : "No name";
+        lobbyState.players.clear();
+        players.forEach(details => {
+            let row = attr(el("tr", playerList), "data-player", details.seat);
 
-            let row = attr(el("tr", playerList), "data-player", id);
-            classes(text(el("td", row), "status"), "player-status");
-            classes(text(el("td", row), name), "player-name");
-            let ready = classes(checkbox(el("td", row)), "player-ready");
+            let status = el("span", classes(el("td", row), Css.Center));
+            classes(status, "player-status");
+            updateStatusIndicator(status, details.status);
 
-            if (id == state.seat) {
+            let nameCell = classes(el("td", row), "player-name");
+
+            let readyCell = classes(el("td", row), Css.Center);
+            let ready = classes(checkbox(readyCell), "player-ready");
+            ready.checked = details.ready;
+
+            let nameInput: undefined | HTMLInputElement = undefined;
+
+            if (details.seat == state.seat) {
+                let name = details.name;
+
+                // The default display name is the first 8 characters of the
+                // seat ID. If this is our display name and we've previously
+                // set a different display name, apply the one we've used in
+                // the past.
+                if (name == details.seat.substring(0, 8)) {
+                    let storedName = localStorage.getItem("displayName");
+                    if (storedName != null) {
+                        name = storedName;
+                        sendMessage({ type: "SetName", value: name });
+                    }
+                }
+
+                nameInput = toggleInput(
+                    nameCell,
+                    name,
+                    s => {
+                        if (s.length < 1 || s.length > 32) {
+                            return "Name must be 1-32 characters.";
+                        } else {
+                            return true;
+                        }
+                    },
+                    value => {
+                        localStorage.setItem("displayName", value);
+                        sendMessage({ type: "SetName", value });
+                    }
+                );
+                attr(nameInput, "minlength", "1");
+                attr(nameInput, "maxlength", "32");
+                nameInput.style.maxWidth = "100px";
+
                 ready.oninput = () => sendMessage(
                     { type: "ReadyState", value: ready.checked }
                 );
             } else {
+                text(classes(el("span", nameCell), Css.Label), details.name);
                 attr(ready, "disabled");
             }
+
+            let nameLabel =
+                nameCell.querySelector(`.${Css.Label}`) as HTMLElement;
+            lobbyState.players.set(
+                details.seat,
+                { nameLabel, nameInput, status, ready }
+            );
         });
+    };
+
+    const updatePlayerDetails = (details: PlayerDetails) => {
+        let fields = lobbyState.players.get(details.seat);
+        if (fields != null) {
+            if (fields.nameInput) {
+                fields.nameInput.value = details.name;
+            }
+            text(fields.nameLabel, details.name);
+            updateStatusIndicator(fields.status, details.status);
+            fields.ready.checked = details.ready;
+        }
+
+        // TODO request new player list?
     };
 
     return {
         phase: Phase.Lobby,
-        updatePlayerList
+        updatePlayerList,
+        updatePlayerDetails,
     };
 }
 
 function renderCard(root: HTMLElement, card: Card): HTMLElement {
     let img = el("img", root);
     attr(img, "src", card.image);
-    classes(img, Classes.Card);
+    classes(img, Css.Card);
     return img;
 }
 
@@ -236,8 +401,8 @@ function populatePack(root: HTMLElement, cards: Card[]) {
 
     heading(root, "Current pack");
     renderCardList(root, cards);
-    forEachEl(`.${Classes.Card}`, img => img.onclick = e => {
-        if (img.classList.contains(Classes.Selected)) {
+    forEachEl(`.${Css.Card}`, img => img.onclick = e => {
+        if (img.classList.contains(Css.Selected)) {
             if (img.dataset.index === undefined) {
                 console.error("Card with no index. Can't pick.", img);
                 return;
@@ -248,10 +413,10 @@ function populatePack(root: HTMLElement, cards: Card[]) {
             });
         } else {
             forEachEl(
-                `.${Classes.Card}.${Classes.Selected}`,
-                card => card.classList.remove(Classes.Selected)
+                `.${Css.Card}.${Css.Selected}`,
+                card => card.classList.remove(Css.Selected)
             );
-            img.classList.add(Classes.Selected);
+            img.classList.add(Css.Selected);
         }
         e.stopPropagation();
     });
@@ -280,14 +445,15 @@ function setUpDraft(root: HTMLElement): UiState {
     heading(header, "Draft in progress");
     let pack = classes(el("div", float), "container", "simple-border");
     let pool = classes(el("div", float), "container", "simple-border");
+    heading(pool, "Picked cards");
 
     // TODO implement player list
     const updateCardWidths = renderCardWidthSelector(header);
 
     pack.onclick = () => {
         forEachEl(
-            `.${Classes.Card}.${Classes.Selected}`,
-            card => card.classList.remove(Classes.Selected)
+            `.${Css.Card}.${Css.Selected}`,
+            card => card.classList.remove(Css.Selected)
         );
     };
 
@@ -315,6 +481,7 @@ function setUpDraft(root: HTMLElement): UiState {
         receivePack,
         pickSuccessful,
         updatePlayerList: null!, // TODO
+        updatePlayerDetails: null!, // TODO
         updatePool,
     };
 }
@@ -337,6 +504,7 @@ function setUpFinished(root: HTMLElement): UiState {
     return {
         phase: Phase.Finished,
         updatePlayerList: null!, // TODO
+        updatePlayerDetails: null!, // TODO
         updatePool,
     };
 }
@@ -411,6 +579,18 @@ function updatePool(pool: Card[]) {
     }
 }
 
+function updatePlayerDetails(details: PlayerDetails) {
+    switch (state.ui.phase) {
+        case Phase.Lobby:
+        case Phase.Draft:
+        case Phase.Finished:
+            state.ui.updatePlayerDetails(details);
+            break;
+        default:
+            break;
+    }
+}
+
 function updatePlayerList(playerList: PlayerList) {
     switch (state.ui.phase) {
         case Phase.Lobby:
@@ -455,7 +635,6 @@ function handleMessage(message: ServerMessage) {
         case "Connected":
             moveToPhase(Phase.Lobby);
             updateDraftSeat(message.value.draft, message.value.seat);
-            updatePlayerList(message.value.players);
             break;
         case "Reconnected":
             let draft_in_progress = message.value.in_progress;
@@ -466,6 +645,12 @@ function handleMessage(message: ServerMessage) {
             break;
         case "Refresh":
             location.href = location.href;
+            break;
+        case "PlayerUpdate":
+            updatePlayerDetails(message.value);
+            break;
+        case "PlayerList":
+            updatePlayerList(message.value);
             break;
     }
 }
@@ -506,15 +691,16 @@ function openWebsocket(draftId: string) {
         url = url + "/" + seatId;
     }
 
+    let decoder = new TextDecoder("utf-8");
+
     const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
     ws.onopen = e => {
         console.log("Websocket opened.");
         state.reconnectAttempts = 0;
         state.socket = ws;
     };
-    ws.onmessage = e => {
-        e.data.text().then((json: string) => handleMessage(JSON.parse(json)));
-    };
+    ws.onmessage = e => handleMessage(JSON.parse(decoder.decode(e.data)));
     ws.onclose = e => { state.socket = null; };
     ws.onerror = e => {
         console.error("Websocket error:", e);

@@ -219,8 +219,6 @@ impl Draft {
 
 #[cfg(test)]
 mod test {
-    use std::assert_matches::assert_matches;
-
     use uuid::Uuid;
 
     use crate::draft::{

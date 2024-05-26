@@ -7,7 +7,7 @@ BUILD="$ROOT/build"
 CONTENT="$BUILD/content"
 
 _cargo() {
-    CARGO_TARGET_DIR="$BUILD/target" cargo $1 \
+    RUST_BACKTRACE=1 CARGO_TARGET_DIR="$BUILD/target" cargo $1 \
         --manifest-path "$ROOT/server/Cargo.toml" "${@:2}"
 }
 

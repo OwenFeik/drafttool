@@ -4,6 +4,33 @@ html {
     --pad-half: 0.5rem;
 }
 
+td {
+    padding: var(--pad-half);
+}
+
+td.center {
+    text-align: center;
+}
+
+.player-status {
+    border-radius: 50%;
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+}
+
+.player-status.ok {
+    background-color: var(--green);
+}
+
+.player-status.warn {
+    background-color: var(--yellow);
+}
+
+.player-status.err {
+    background-color: var(--red);
+}
+
 .container {
     margin: var(--pad-one);
     position: relative;
@@ -43,5 +70,11 @@ html {
 }
 
 .card.selected {
-    border: 2px solid yellowgreen;
+    border: 2px solid var(--selected);
+}
+
+.link-button {
+    color: lightslategrey;
+    cursor: pointer;
+    padding-left: var(--pad-half);
 }

@@ -1,0 +1,16 @@
+html {
+    font-family: sans-serif;
+
+    --green: green;
+    --red: red;
+    --yellow: yellow;
+    --selected: yellowgreen;
+}
+
+input:invalid {
+    border-color: var(--red);
+}
+
+.hide {
+    display: none !important;
+}
