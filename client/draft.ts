@@ -255,6 +255,13 @@ function toggleInput(
     return inp;
 }
 
+function statusIndicator(parent: HTMLElement, status: Status): HTMLElement {
+    let indicator = el("span", parent);
+    classes(indicator, "player-status");
+    updateStatusIndicator(indicator, status);
+    return indicator;
+}
+
 function updateStatusIndicator(element: HTMLElement, status: Status) {
     element.classList.remove("ok", "warn", "err");
     element.classList.add(
@@ -292,14 +299,15 @@ function setUpLobby(root: HTMLElement): UiState {
         players.forEach(details => {
             let row = attr(el("tr", playerList), "data-player", details.seat);
 
-            let status = el("span", classes(el("td", row), Css.Center));
-            classes(status, "player-status");
-            updateStatusIndicator(status, details.status);
+            let status = statusIndicator(
+                classes(el("td", row), Css.Center),
+                details.status
+            );
 
-            let nameCell = classes(el("td", row), "player-name");
+            let nameCell = el("td", row);
 
             let readyCell = classes(el("td", row), Css.Center);
-            let ready = classes(checkbox(readyCell), "player-ready");
+            let ready = checkbox(readyCell);
             ready.checked = details.ready;
 
             let nameInput: undefined | HTMLInputElement = undefined;
@@ -422,9 +430,31 @@ function populatePack(root: HTMLElement, cards: Card[]) {
     });
 }
 
+function renderDraftPlayers(root: HTMLElement):
+    [(players: PlayerList) => void, (details: PlayerDetails) => void]
+{
+    let list = classes(el("span", root), "header-el");
+
+    const updatePlayerList = (players: PlayerList) => {
+        list.innerHTML = "";
+        players.forEach(details => {
+            let entry  = el("span", list);
+            let status = statusIndicator(entry, details.status);
+            let name = text(el("span", entry), details.name);
+
+        });
+    };
+
+    const updatePlayerDetails = (details: PlayerDetails) => {
+
+    };
+
+    return [updatePlayerList, updatePlayerDetails];
+}
+
 function renderCardWidthSelector(root: HTMLElement): (() => void) {
     let widthBox = el("span", root);
-    text(el("span", widthBox), "Card size");
+    text(classes(el("span", widthBox), "header-el"), "Card size");
     let width = el("input", widthBox) as HTMLInputElement;
     attr(width, "type", "range")
     attr(width, "min", "40");
@@ -447,7 +477,7 @@ function setUpDraft(root: HTMLElement): UiState {
     let pool = classes(el("div", float), "container", "simple-border");
     heading(pool, "Picked cards");
 
-    // TODO implement player list
+    const [updatePlayerList, updatePlayerDetails] = renderDraftPlayers(header);
     const updateCardWidths = renderCardWidthSelector(header);
 
     pack.onclick = () => {
@@ -510,8 +540,20 @@ function setUpFinished(root: HTMLElement): UiState {
 }
 
 function setUpTerminated(root: HTMLElement): UiState {
-    // TODO set up the page to display a fatal error.
-    return null!;
+    let float = classes(el("div", root), "floating-centered", "simple-border");
+    heading(float, "Draft terminated");
+    let content = classes(el("div", float), "padded");
+    text(el("span", content), "Error: ").style.fontWeight = "bold";
+    let msg = el("span", content);
+
+    const displayErrorMessage = (message: string) => {
+        msg.innerText = message;
+    };
+
+    return {
+        phase: Phase.Terminated,
+        displayErrorMessage
+    };
 }
 
 function moveToPhase(phase: Phase) {
@@ -616,7 +658,7 @@ function handleMessage(message: ServerMessage) {
             terminate("Failed to join draft. Draft has already started.");
             break;
         case "Ended":
-            moveToPhase(Phase.Finished);
+            terminate("Failed to join draft. Draft already complete.");
             break;
         case "FatalError":
             terminate("Server error: " + message.value);

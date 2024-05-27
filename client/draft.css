@@ -46,6 +46,10 @@ td.center {
     border-bottom: none;
 }
 
+.header-el:not(:last-child) {
+    border-right: var(--simple-border);
+}
+
 .floating-centered {
     position: absolute;
     top: 50%;
