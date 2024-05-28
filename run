@@ -18,7 +18,7 @@ content-cp() {
 
 content() {
     content-cp
-    tsc --outDir "$CONTENT/" --lib "es2015,dom" "$ROOT/client/"*".ts"
+    tsc --outDir "$CONTENT/" --lib "es2016,dom" "$ROOT/client/"*".ts"
 }
 
 serve() {

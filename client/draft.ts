@@ -101,6 +101,8 @@ type UiState =
 type State = {
     draft: string | null,
     seat: string | null,
+    players: string[]
+    playerDetails: Map<string, PlayerDetails>,
     ui: UiState,
     socket: WebSocket | null,
     reconnectAttempts: number,
@@ -109,6 +111,8 @@ type State = {
 let state: State = {
     draft: null,
     seat: null,
+    players: [],
+    playerDetails: new Map(),
     ui: { phase: Phase.Connecting },
     socket: null,
     reconnectAttempts: 0,
@@ -271,31 +275,60 @@ function updateStatusIndicator(element: HTMLElement, status: Status) {
     );
 }
 
-type UiPlayerList = {
+function cacheDisplayName(name: string) {
+    if (state.seat == null) {
+        return;
+    }
+
+    if (name != state.seat.substring(0, 8)) {
+        localStorage.setItem("displayName", name);
+    }
+}
+
+type UiPlayerListEntry = {
     seat: string,
     nameLabel: HTMLElement,
     nameInput?: HTMLInputElement,
     status: HTMLElement,
     ready?: HTMLInputElement,
-}[];
+};
 
-function updatePlayerListUi(details: PlayerDetails, state: UiPlayerList): boolean {
-    let entry = state.find(player => player.seat == details.seat);
+type UiPlayerList = {
+    entries: UiPlayerListEntry[],
+    renderEntry: (details: PlayerDetails) => UiPlayerListEntry,
+};
 
-    if (fields != null) {
-        if (fields.nameInput) {
-            fields.nameInput.value = details.name;
+function statePlayerList(): PlayerList {
+    let playerList: PlayerDetails[] = [];
+    state.players.forEach(player => {
+        let details = state.playerDetails.get(player);
+        if (details != null) {
+            playerList.push(details);
         }
-        text(fields.nameLabel, details.name);
-        updateStatusIndicator(fields.status, details.status);
+    });
+    return playerList;
+}
 
-        if (fields.ready) {
-            fields.ready.checked = details.ready;
+function updatePlayerListEntry(details: PlayerDetails, ui: UiPlayerList) {
+    let entry = ui.entries.find(player => player.seat == details.seat);
+    if (entry === undefined) {
+        entry = ui.renderEntry(details);
+        ui.entries.push(entry);
+        if (!state.players.includes(entry.seat)) {
+            state.players.push(entry.seat);
         }
+    }
+    state.playerDetails.set(entry.seat, details);
 
-        return true;
-    } else {
-        return false;
+    text(entry.nameLabel, details.name);
+    updateStatusIndicator(entry.status, details.status);
+
+    if (entry.nameInput) {
+        entry.nameInput.value = details.name;
+    }
+
+    if (entry.ready) {
+        entry.ready.checked = details.ready;
     }
 }
 
@@ -307,16 +340,12 @@ function setUpLobby(root: HTMLElement): UiState {
     text(el("th", headrow), "User");
     text(el("th", headrow), "Ready");
 
-    let lobbyState: UiPlayerList = {
-        players: new Map()
-    };
-
     let playerList = el("tbody", table);
-    const updatePlayerList = (players: PlayerList) => {
-        playerList.innerHTML = "";
-        lobbyState.players.clear();
-        players.forEach(details => {
-            let row = attr(el("tr", playerList), "data-player", details.seat);
+    let lobbyState: UiPlayerList = {
+        entries: [],
+        renderEntry: details => {
+            let seat = details.seat;
+            let row = attr(el("tr", playerList), "data-player", seat);
 
             let status = statusIndicator(
                 classes(el("td", row), Css.Center),
@@ -331,14 +360,14 @@ function setUpLobby(root: HTMLElement): UiState {
 
             let nameInput: undefined | HTMLInputElement = undefined;
 
-            if (details.seat == state.seat) {
+            if (seat == state.seat) {
                 let name = details.name;
 
                 // The default display name is the first 8 characters of the
                 // seat ID. If this is our display name and we've previously
                 // set a different display name, apply the one we've used in
                 // the past.
-                if (name == details.seat.substring(0, 8)) {
+                if (name == seat.substring(0, 8)) {
                     let storedName = localStorage.getItem("displayName");
                     if (storedName != null) {
                         name = storedName;
@@ -357,7 +386,7 @@ function setUpLobby(root: HTMLElement): UiState {
                         }
                     },
                     value => {
-                        localStorage.setItem("displayName", value);
+                        cacheDisplayName(value);
                         sendMessage({ type: "SetName", value });
                     }
                 );
@@ -375,16 +404,21 @@ function setUpLobby(root: HTMLElement): UiState {
 
             let nameLabel =
                 nameCell.querySelector(`.${Css.Label}`) as HTMLElement;
-            lobbyState.players.set(
-                details.seat,
-                { nameLabel, nameInput, status, ready }
-            );
-        });
+            return { seat, nameLabel, nameInput, status, ready };
+        }
+    };
+
+    const updatePlayerList = (players: PlayerList) => {
+        playerList.innerHTML = "";
+        state.players = [];
+        state.playerDetails.clear();
+        lobbyState.entries = [];
+        players.forEach(details => updatePlayerListEntry(details, lobbyState));
     };
 
     // TODO request update if player missing from list.
     const updatePlayerDetails =
-        (details: PlayerDetails) => updateDetailsUi(details, lobbyState);
+        (details: PlayerDetails) => updatePlayerListEntry(details, lobbyState);
 
     return {
         phase: Phase.Lobby,
@@ -443,26 +477,26 @@ function renderDraftPlayers(root: HTMLElement):
     [(players: PlayerList) => void, (details: PlayerDetails) => void] {
     let list = classes(el("span", root), "header-segment");
 
-    let playerList: UiPlayerList = {
-        players: new Map()
+    let listState: UiPlayerList = {
+        entries: [],
+        renderEntry: details => {
+            let entry = el("span", list);
+            let status = statusIndicator(entry, details.status);
+            let nameLabel = text(el("span", entry), details.name);
+            return { seat: details.seat, nameLabel, status };
+        }
     };
 
     const updatePlayerList = (players: PlayerList) => {
         list.innerHTML = "";
-        players.forEach(details => {
-            let entry = el("span", list);
-            let status = statusIndicator(entry, details.status);
-            let name = text(el("span", entry), details.name);
-
-            playerList.players.set(details.seat, {
-                nameLabel: name,
-                status,
-            })
-        });
+        state.players = [];
+        state.playerDetails.clear();
+        listState.entries = [];
+        players.forEach(details => updatePlayerListEntry(details, listState));
     };
 
     const updatePlayerDetails =
-        (details: PlayerDetails) => updateDetailsUi(details, playerList);
+        (details: PlayerDetails) => updatePlayerListEntry(details, listState);
 
     return [updatePlayerList, updatePlayerDetails];
 }
@@ -493,6 +527,8 @@ function setUpDraft(root: HTMLElement): UiState {
     heading(pool, "Picked cards");
 
     const [updatePlayerList, updatePlayerDetails] = renderDraftPlayers(header);
+    updatePlayerList(statePlayerList());
+
     const updateCardWidths = renderCardWidthSelector(header);
 
     pack.onclick = () => {

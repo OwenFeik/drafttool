@@ -25,7 +25,16 @@ pub async fn handle_launch_request(
 ) -> axum::response::Response<String> {
     let mut cards = None;
     let mut list = None;
-    let mut config = DraftConfig::default();
+
+    // If booleans are omitted from the form data, it's because their
+    // checkboxes are unchecked, and the associated variables should be false.
+    // Hence default all configurable booleans to false.
+    let mut config = DraftConfig {
+        unique_cards: false,
+        use_rarities: false,
+        ..DraftConfig::default()
+    };
+
     while let Ok(Some(field)) = data.next_field().await {
         let field_name = field.name().unwrap_or("").to_string();
         if field_name == "card_database" {

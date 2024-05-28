@@ -156,11 +156,41 @@ impl Client {
     }
 }
 
+struct DraftClients {
+    clients: Vec<Client>,
+}
+
+impl DraftClients {
+    fn is_empty(&self) -> bool {
+        self.clients.is_empty()
+    }
+
+    fn add(&mut self, client: Client) {
+        self.clients.push(client);
+    }
+
+    fn get(&self, id: Uuid) -> Option<&Client> {
+        self.clients.iter().find(|c| c.id == id)
+    }
+
+    fn get_mut(&mut self, id: Uuid) -> Option<&mut Client> {
+        self.clients.iter_mut().find(|c| c.id == id)
+    }
+
+    fn remove(&mut self, id: Uuid) {
+        self.clients.retain(|c| c.id != id);
+    }
+
+    fn iter(&self) -> std::slice::Iter<Client> {
+        self.clients.iter()
+    }
+}
+
 pub struct DraftServer {
     id: Uuid,
     phase: Phase,
     chan: UnboundedReceiver<DraftServerRequest>,
-    clients: HashMap<Uuid, Client>,
+    clients: DraftClients,
 }
 
 impl DraftServer {
@@ -173,7 +203,9 @@ impl DraftServer {
                 id,
                 phase: Phase::Lobby(HashMap::new(), config, pool),
                 chan: recv,
-                clients: HashMap::new(),
+                clients: DraftClients {
+                    clients: Vec::new(),
+                },
             };
             server.run().await;
         });
@@ -188,7 +220,7 @@ impl DraftServer {
     }
 
     fn broadcast(&self, message: ServerMessage, exclude: Option<Uuid>) {
-        for client in self.clients.values() {
+        for client in self.clients.iter() {
             if Some(client.id) != exclude {
                 client.send(message.clone());
             }
@@ -202,7 +234,7 @@ impl DraftServer {
             true
         };
 
-        if let Some(client) = self.clients.get(&player) {
+        if let Some(client) = self.clients.get(player) {
             self.broadcast(
                 ServerMessage::PlayerUpdate(PlayerDetails {
                     seat: player,
@@ -212,6 +244,15 @@ impl DraftServer {
                 }),
                 Some(player),
             );
+        }
+    }
+
+    fn set_client_status(&mut self, id: Uuid, status: ClientStatus) {
+        if let Some(client) = self.clients.get_mut(id) {
+            if client.known_status != status {
+                client.known_status = status;
+                self.broadcast_player_update(id);
+            }
         }
     }
 
@@ -226,9 +267,10 @@ impl DraftServer {
     }
 
     fn handle_client_connection(&mut self, id: Uuid, chan: UnboundedSender<ServerMessage>) {
-        if let Some(client) = self.clients.get_mut(&id) {
+        if let Some(client) = self.clients.get_mut(id) {
             client.chan = chan;
-            let client = self.clients.get(&id).unwrap(); // de-mut reference.
+            self.set_client_status(id, ClientStatus::Ok);
+            let client = self.clients.get(id).unwrap(); // de-mut reference.
             match &self.phase {
                 Phase::Lobby(..) => client.send(ServerMessage::Connected {
                     draft: self.id,
@@ -267,7 +309,7 @@ impl DraftServer {
                 known_status: ClientStatus::Ok,
                 heartbeat: Instant::now(),
             };
-            self.clients.insert(id, client);
+            self.clients.add(client);
             self.send_to(
                 id,
                 ServerMessage::Connected {
@@ -282,7 +324,7 @@ impl DraftServer {
     }
 
     fn handle_client_message(&mut self, id: Uuid, msg: ClientMessage) {
-        if let Some(client) = self.clients.get_mut(&id) {
+        if let Some(client) = self.clients.get_mut(id) {
             client.heartbeat = Instant::now();
             match msg {
                 ClientMessage::HeartBeat => client.heartbeat = Instant::now(),
@@ -296,12 +338,11 @@ impl DraftServer {
                 }
                 ClientMessage::Disconnected => {
                     if let Phase::Lobby(readys, ..) = &mut self.phase {
-                        self.clients.remove(&id);
+                        self.clients.remove(id);
                         readys.remove(&id);
                         self.broadcast(ServerMessage::PlayerList(self.player_list()), None);
                     } else {
-                        client.known_status = ClientStatus::Error;
-                        self.broadcast_player_update(id);
+                        self.set_client_status(id, ClientStatus::Error);
                     }
                 }
                 ClientMessage::SetName(name) => {
@@ -328,7 +369,7 @@ impl DraftServer {
     }
 
     fn send_to(&self, id: Uuid, message: ServerMessage) {
-        if let Some(client) = self.clients.get(&id) {
+        if let Some(client) = self.clients.get(id) {
             client.send(message);
         }
     }
@@ -343,12 +384,12 @@ impl DraftServer {
         if let Phase::Lobby(readys, ..) = &self.phase {
             readys.get(&seat).cloned().unwrap_or(false)
         } else {
-            self.clients.contains_key(&seat)
+            self.clients.get(seat).is_some()
         }
     }
 
     fn details_of(&self, seat: Uuid) -> Option<PlayerDetails> {
-        let client = self.clients.get(&seat)?;
+        let client = self.clients.get(seat)?;
         Some(PlayerDetails {
             seat,
             name: client.name.clone(),
@@ -359,7 +400,7 @@ impl DraftServer {
 
     fn player_list(&self) -> Vec<PlayerDetails> {
         self.clients
-            .values()
+            .iter()
             .filter_map(|c| self.details_of(c.id))
             .collect()
     }
@@ -371,10 +412,10 @@ impl DraftServer {
             if !self.clients.is_empty()
                 && self
                     .clients
-                    .values()
+                    .iter()
                     .all(|c| readys.get(&c.id).copied().unwrap_or(false))
             {
-                let players: Vec<Uuid> = self.clients.values().map(|c| c.id).collect();
+                let players: Vec<Uuid> = self.clients.iter().map(|c| c.id).collect();
                 match make_packs(players.len(), config, pool.clone()) {
                     Ok(packs) => {
                         let mut draft = Draft::new(players, config.rounds, packs);

@@ -132,13 +132,15 @@ impl DraftPool {
         if let Some(card) = exact {
             Ok(card.clone())
         } else if allow_fallback || rarity == Rarity::Mythic && !self.rares.is_empty() {
-            if let Some(fallback) = self.replacement_rarity(rarity) {
-                self.roll(fallback, false)
+            if let Some(fallback) = self.replacement_rarity(rarity)
+                && let Ok(card) = self.roll(fallback, false)
+            {
+                Ok(card)
             } else {
                 err(format!("Insufficient {rarity:?}s in pool."))
             }
         } else {
-            err("Insufficient cards in pool.")
+            err(format!("Insufficient {rarity:?}s in pool."))
         }
     }
 }
