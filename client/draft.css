@@ -37,16 +37,18 @@ td.center {
 }
 
 .container-heading {
-    border-bottom: var(--simple-border);
-    padding: var(--pad-half);
     text-align: center;
 }
 
-.container-heading:only-child {
-    border-bottom: none;
+.container-segment _ {
+    padding: var(--pad-half);
 }
 
-.header-el:not(:last-child) {
+.container-segment:not(:last-child) {
+    border-bottom: var(--simple-border);
+}
+
+.header-segment:not(:last-child) {
     border-right: var(--simple-border);
 }
 

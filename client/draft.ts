@@ -171,7 +171,7 @@ function checkbox(parent?: HTMLElement): HTMLInputElement {
 
 function heading(parent: HTMLElement, content: string): HTMLElement {
     return text(
-        classes(el("div", parent), "container-heading"),
+        classes(el("div", parent), "container-heading", "container-segment"),
         content
     );
 }
@@ -272,13 +272,32 @@ function updateStatusIndicator(element: HTMLElement, status: Status) {
 }
 
 type UiPlayerList = {
-    players: Map<string, {
-        nameLabel: HTMLElement,
-        nameInput?: HTMLInputElement,
-        status: HTMLElement,
-        ready: HTMLInputElement,
-    }>
-};
+    seat: string,
+    nameLabel: HTMLElement,
+    nameInput?: HTMLInputElement,
+    status: HTMLElement,
+    ready?: HTMLInputElement,
+}[];
+
+function updatePlayerListUi(details: PlayerDetails, state: UiPlayerList): boolean {
+    let entry = state.find(player => player.seat == details.seat);
+
+    if (fields != null) {
+        if (fields.nameInput) {
+            fields.nameInput.value = details.name;
+        }
+        text(fields.nameLabel, details.name);
+        updateStatusIndicator(fields.status, details.status);
+
+        if (fields.ready) {
+            fields.ready.checked = details.ready;
+        }
+
+        return true;
+    } else {
+        return false;
+    }
+}
 
 function setUpLobby(root: HTMLElement): UiState {
     let float = classes(el("div", root), "floating-centered", "simple-border");
@@ -363,19 +382,9 @@ function setUpLobby(root: HTMLElement): UiState {
         });
     };
 
-    const updatePlayerDetails = (details: PlayerDetails) => {
-        let fields = lobbyState.players.get(details.seat);
-        if (fields != null) {
-            if (fields.nameInput) {
-                fields.nameInput.value = details.name;
-            }
-            text(fields.nameLabel, details.name);
-            updateStatusIndicator(fields.status, details.status);
-            fields.ready.checked = details.ready;
-        }
-
-        // TODO request new player list?
-    };
+    // TODO request update if player missing from list.
+    const updatePlayerDetails =
+        (details: PlayerDetails) => updateDetailsUi(details, lobbyState);
 
     return {
         phase: Phase.Lobby,
@@ -431,23 +440,29 @@ function populatePack(root: HTMLElement, cards: Card[]) {
 }
 
 function renderDraftPlayers(root: HTMLElement):
-    [(players: PlayerList) => void, (details: PlayerDetails) => void]
-{
-    let list = classes(el("span", root), "header-el");
+    [(players: PlayerList) => void, (details: PlayerDetails) => void] {
+    let list = classes(el("span", root), "header-segment");
+
+    let playerList: UiPlayerList = {
+        players: new Map()
+    };
 
     const updatePlayerList = (players: PlayerList) => {
         list.innerHTML = "";
         players.forEach(details => {
-            let entry  = el("span", list);
+            let entry = el("span", list);
             let status = statusIndicator(entry, details.status);
             let name = text(el("span", entry), details.name);
 
+            playerList.players.set(details.seat, {
+                nameLabel: name,
+                status,
+            })
         });
     };
 
-    const updatePlayerDetails = (details: PlayerDetails) => {
-
-    };
+    const updatePlayerDetails =
+        (details: PlayerDetails) => updateDetailsUi(details, playerList);
 
     return [updatePlayerList, updatePlayerDetails];
 }
@@ -510,8 +525,8 @@ function setUpDraft(root: HTMLElement): UiState {
         phase: Phase.Draft,
         receivePack,
         pickSuccessful,
-        updatePlayerList: null!, // TODO
-        updatePlayerDetails: null!, // TODO
+        updatePlayerList,
+        updatePlayerDetails,
         updatePool,
     };
 }
@@ -743,7 +758,10 @@ function openWebsocket(draftId: string) {
         state.socket = ws;
     };
     ws.onmessage = e => handleMessage(JSON.parse(decoder.decode(e.data)));
-    ws.onclose = e => { state.socket = null; };
+    ws.onclose = e => {
+        console.log("Websocket closed.");
+        state.socket = null;
+    };
     ws.onerror = e => {
         console.error("Websocket error:", e);
         if (state.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -751,7 +769,7 @@ function openWebsocket(draftId: string) {
             openWebsocket(draftId);
         } else {
             console.log("Maximum number of reconnect attempts exceeded.");
-            displayErrorMessage("Connection error.");
+            terminate("Connection error.");
         }
     };
 }

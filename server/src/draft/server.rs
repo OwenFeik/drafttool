@@ -234,21 +234,29 @@ impl DraftServer {
                     draft: self.id,
                     seat: id,
                 }),
-                Phase::Draft(draft) => client.send(ServerMessage::Reconnected {
-                    draft: self.id,
-                    seat: id,
-                    in_progress: true,
-                    pool: draft.drafted_cards(id).cloned().unwrap_or_default(),
-                    pack: draft.current_pack(id),
-                }),
-                Phase::Finished(pools) => client.send(ServerMessage::Reconnected {
-                    draft: self.id,
-                    seat: id,
-                    in_progress: false,
-                    pool: pools.get(&id).cloned().unwrap_or_default(),
-                    pack: None,
-                }),
-                Phase::Terminated => {}
+                Phase::Draft(draft) => {
+                    client.send(ServerMessage::Reconnected {
+                        draft: self.id,
+                        seat: id,
+                        in_progress: true,
+                        pool: draft.drafted_cards(id).cloned().unwrap_or_default(),
+                        pack: draft.current_pack(id),
+                    });
+                    client.send(ServerMessage::PlayerList(self.player_list()));
+                }
+                Phase::Finished(pools) => {
+                    client.send(ServerMessage::Reconnected {
+                        draft: self.id,
+                        seat: id,
+                        in_progress: false,
+                        pool: pools.get(&id).cloned().unwrap_or_default(),
+                        pack: None,
+                    });
+                    client.send(ServerMessage::PlayerList(self.player_list()));
+                }
+                Phase::Terminated => {
+                    client.send(ServerMessage::FatalError("Draft terminated.".into()))
+                }
             }
         } else if let Phase::Lobby(readys, ..) = &mut self.phase {
             readys.insert(id, false);
