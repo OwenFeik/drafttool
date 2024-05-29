@@ -227,6 +227,7 @@ function toggleInput(
         cancel.classList.remove(Css.Hide);
 
         inp.focus();
+        inp.select();
     };
 
     save.onclick = () => {
@@ -310,6 +311,20 @@ function statePlayerList(): PlayerList {
 }
 
 function updatePlayerListEntry(details: PlayerDetails, ui: UiPlayerList) {
+    if (details.seat == state.seat && state.ui.phase == Phase.Lobby) {
+        // The default display name is the first 8 characters of the
+        // seat ID. If this is our display name and we've previously
+        // set a different display name, apply the one we've used in
+        // the past.
+        if (details.name == state.seat.substring(0, 8)) {
+            let storedName = localStorage.getItem("displayName");
+            if (storedName != null) {
+                details.name = storedName;
+                sendMessage({ type: "SetName", value: details.name });
+            }
+        }
+    }
+
     let entry = ui.entries.find(player => player.seat == details.seat);
     if (entry === undefined) {
         entry = ui.renderEntry(details);
@@ -362,19 +377,6 @@ function setUpLobby(root: HTMLElement): UiState {
 
             if (seat == state.seat) {
                 let name = details.name;
-
-                // The default display name is the first 8 characters of the
-                // seat ID. If this is our display name and we've previously
-                // set a different display name, apply the one we've used in
-                // the past.
-                if (name == seat.substring(0, 8)) {
-                    let storedName = localStorage.getItem("displayName");
-                    if (storedName != null) {
-                        name = storedName;
-                        sendMessage({ type: "SetName", value: name });
-                    }
-                }
-
                 nameInput = toggleInput(
                     nameCell,
                     name,
@@ -475,14 +477,15 @@ function populatePack(root: HTMLElement, cards: Card[]) {
 
 function renderDraftPlayers(root: HTMLElement):
     [(players: PlayerList) => void, (details: PlayerDetails) => void] {
-    let list = classes(el("span", root), "header-segment");
+    let list = el("span", root);
 
     let listState: UiPlayerList = {
         entries: [],
         renderEntry: details => {
-            let entry = el("span", list);
+            let entry = classes(el("span", list), "padhalf");
             let status = statusIndicator(entry, details.status);
             let nameLabel = text(el("span", entry), details.name);
+            el("span", list).innerHTML = "&larr;";
             return { seat: details.seat, nameLabel, status };
         }
     };
@@ -526,10 +529,13 @@ function setUpDraft(root: HTMLElement): UiState {
     let pool = classes(el("div", float), "container", "simple-border");
     heading(pool, "Picked cards");
 
-    const [updatePlayerList, updatePlayerDetails] = renderDraftPlayers(header);
+    let headerControls = el("div", header);
+    classes(headerControls, "container-segment", "container-controls");
+    const [updatePlayerList, updatePlayerDetails] =
+        renderDraftPlayers(headerControls);
     updatePlayerList(statePlayerList());
 
-    const updateCardWidths = renderCardWidthSelector(header);
+    const updateCardWidths = renderCardWidthSelector(headerControls);
 
     pack.onclick = () => {
         forEachEl(

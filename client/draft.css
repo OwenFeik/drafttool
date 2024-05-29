@@ -12,11 +12,18 @@ td.center {
     text-align: center;
 }
 
+input[type="range"] {
+    margin: 0;
+}
+
 .player-status {
     border-radius: 50%;
     display: inline-block;
     width: 1em;
     height: 1em;
+    margin-left: 0.25em;
+    margin-right: 0.25em;
+    transform: translateY(0.125em);
 }
 
 .player-status.ok {
@@ -37,7 +44,24 @@ td.center {
 }
 
 .container-heading {
+    font-weight: bold;
     text-align: center;
+}
+
+.container-controls {
+    align-items: center;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+
+    > * {
+        flex: 1 1 auto;
+        text-align: center;
+    }
+
+    > * + * {
+        border-left: var(--simple-border);
+    }
 }
 
 .container-segment _ {
@@ -46,10 +70,6 @@ td.center {
 
 .container-segment:not(:last-child) {
     border-bottom: var(--simple-border);
-}
-
-.header-segment:not(:last-child) {
-    border-right: var(--simple-border);
 }
 
 .floating-centered {
@@ -65,6 +85,10 @@ td.center {
 
 .padded {
     padding: var(--pad-one);
+}
+
+.padhalf {
+    padding: var(--pad-half);
 }
 
 .card {

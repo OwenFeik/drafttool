@@ -115,7 +115,7 @@ impl ServerPool {
         }
     }
 
-    pub fn spawn(&mut self, config: DraftConfig, pool: DraftPool) -> Uuid {
+    pub(super) fn spawn(&mut self, config: DraftConfig, pool: DraftPool) -> Uuid {
         let handle = DraftServer::spawn(config, pool);
         let id = handle.id;
         self.servers.insert(id, handle);
@@ -539,8 +539,8 @@ mod test {
     #[tokio::test]
     async fn test_set_name() {
         let handle = &DraftServer::spawn(DraftConfig::default(), DraftPool::new());
-        let (p1, mut chan1) = add_client(handle).await;
-        let (p2, mut chan2) = add_client(handle).await;
+        let (p1, mut _chan1) = add_client(handle).await;
+        let (_p2, mut chan2) = add_client(handle).await;
 
         client_send(handle, p1, ClientMessage::SetName("name".into()));
         let ServerMessage::PlayerUpdate(PlayerDetails {
