@@ -69,6 +69,9 @@ pub enum ServerMessage {
 
     /// Client name, ready state or status update.
     PlayerUpdate(PlayerDetails),
+
+    /// Seat ID, number of queued packs.
+    QueueSize { seat: Uuid, count: usize },
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -378,6 +381,18 @@ impl DraftServer {
         for (id, pack) in packs {
             self.send_to(id, ServerMessage::Pack(pack));
         }
+
+        if let Phase::Draft(game) = &self.phase {
+            for player in self.player_list().iter() {
+                self.broadcast(
+                    ServerMessage::QueueSize {
+                        seat: player.seat,
+                        count: game.queue_size(player.seat),
+                    },
+                    None,
+                );
+            }
+        }
     }
 
     fn ready_state(&self, seat: Uuid) -> bool {
@@ -468,6 +483,13 @@ mod test {
         }
     }
 
+    async fn receive_until<P: Fn(ServerMessage) -> bool>(
+        chan: &mut UnboundedReceiver<ServerMessage>,
+        pred: P,
+    ) {
+        while !pred(receive(chan).await) {}
+    }
+
     async fn add_client(handle: &ServerHandle) -> (Uuid, UnboundedReceiver<ServerMessage>) {
         let user = Uuid::new_v4();
         let (send, mut recv) = unbounded_channel();
@@ -511,29 +533,49 @@ mod test {
 
         // Once both players are ready
         client_send(&handle, p1, ClientMessage::ReadyState(true));
-        assert_matches!(receive(&mut chan2).await, ServerMessage::PlayerUpdate(..));
+        receive_until(&mut chan2, |m| matches!(m, ServerMessage::PlayerUpdate(..))).await;
         client_send(&handle, p2, ClientMessage::ReadyState(true));
-        assert_matches!(receive(&mut chan1).await, ServerMessage::Pack(..));
-        assert_matches!(receive(&mut chan2).await, ServerMessage::Pack(..));
+        receive_until(&mut chan1, |m| matches!(m, ServerMessage::Pack(..))).await;
+        receive_until(&mut chan2, |m| matches!(m, ServerMessage::Pack(..))).await;
 
         // Client one passes, don't expect any packs at this stage as they are
         // backed up behind p2.
         client_send(&handle, p1, ClientMessage::Pick(0));
-        assert_matches!(receive(&mut chan1).await, ServerMessage::PickSuccessful(_));
+        receive_until(&mut chan1, |m| {
+            matches!(m, ServerMessage::PickSuccessful(..))
+        })
+        .await;
 
         // After p2s pick, both players should be sent a new pack.
         client_send(&handle, p2, ClientMessage::Pick(0));
-        assert_matches!(receive(&mut chan2).await, ServerMessage::PickSuccessful(_));
-        assert_matches!(receive(&mut chan2).await, ServerMessage::Pack(..));
-        assert_matches!(receive(&mut chan1).await, ServerMessage::Pack(..));
+        receive_until(&mut chan2, |m| {
+            matches!(m, ServerMessage::PickSuccessful(..))
+        })
+        .await;
+        receive_until(&mut chan2, |m| matches!(m, ServerMessage::Pack(..))).await;
+        receive_until(&mut chan1, |m| matches!(m, ServerMessage::Pack(..))).await;
 
         client_send(&handle, p1, ClientMessage::Pick(0));
-        assert_matches!(receive(&mut chan1).await, ServerMessage::PickSuccessful(_));
+        receive_until(&mut chan1, |m| {
+            matches!(m, ServerMessage::PickSuccessful(..))
+        })
+        .await;
         client_send(&handle, p2, ClientMessage::Pick(0));
-        assert_matches!(receive(&mut chan2).await, ServerMessage::PickSuccessful(_));
+        receive_until(&mut chan2, |m| {
+            matches!(m, ServerMessage::PickSuccessful(..))
+        })
+        .await;
 
-        assert_matches!(receive(&mut chan1).await, ServerMessage::Finished(cards) if cards.len() == 2);
-        assert_matches!(receive(&mut chan2).await, ServerMessage::Finished(cards) if cards.len() == 2);
+        receive_until(
+            &mut chan1,
+            |m| matches!(m, ServerMessage::Finished(cards) if cards.len() == 2),
+        )
+        .await;
+        receive_until(
+            &mut chan2,
+            |m| matches!(m, ServerMessage::Finished(cards) if cards.len() == 2),
+        )
+        .await;
     }
 
     #[tokio::test]

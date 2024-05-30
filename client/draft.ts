@@ -55,7 +55,7 @@ type ServerMessage =
     } | {
         type: "PlayerList",
         value: PlayerList
-    };
+    } | { type: "QueueSize", value: { seat: string, count: number } };
 
 type ClientMessage =
     { type: "HeartBeat" }
@@ -86,6 +86,7 @@ type UiState =
         updatePlayerList: (players: PlayerList) => void,
         updatePlayerDetails: (details: PlayerDetails) => void,
         updatePool: (pool: Card[]) => void,
+        updateQueuedCount: (seat: string, count: number) => void,
     }
     | {
         phase: Phase.Finished,
@@ -292,6 +293,7 @@ type UiPlayerListEntry = {
     nameInput?: HTMLInputElement,
     status: HTMLElement,
     ready?: HTMLInputElement,
+    queueSize?: HTMLElement,
 };
 
 type UiPlayerList = {
@@ -310,6 +312,15 @@ function statePlayerList(): PlayerList {
     return playerList;
 }
 
+function getPlayerListEntry(seat: string, ui: UiPlayerList): UiPlayerListEntry | null {
+    let entry = ui.entries.find(player => player.seat == seat);
+    if (entry === undefined) {
+        return null;
+    } else {
+        return entry;
+    }
+}
+
 function updatePlayerListEntry(details: PlayerDetails, ui: UiPlayerList) {
     if (details.seat == state.seat && state.ui.phase == Phase.Lobby) {
         // The default display name is the first 8 characters of the
@@ -325,8 +336,8 @@ function updatePlayerListEntry(details: PlayerDetails, ui: UiPlayerList) {
         }
     }
 
-    let entry = ui.entries.find(player => player.seat == details.seat);
-    if (entry === undefined) {
+    let entry = getPlayerListEntry(details.seat, ui);
+    if (entry === null) {
         entry = ui.renderEntry(details);
         ui.entries.push(entry);
         if (!state.players.includes(entry.seat)) {
@@ -475,8 +486,11 @@ function populatePack(root: HTMLElement, cards: Card[]) {
     });
 }
 
-function renderDraftPlayers(root: HTMLElement):
-    [(players: PlayerList) => void, (details: PlayerDetails) => void] {
+function renderDraftPlayers(root: HTMLElement): [
+    (players: PlayerList) => void,
+    (details: PlayerDetails) => void,
+    (seat: string, count: number) => void,
+] {
     let list = el("span", root);
 
     let listState: UiPlayerList = {
@@ -485,8 +499,9 @@ function renderDraftPlayers(root: HTMLElement):
             let entry = classes(el("span", list), "padhalf");
             let status = statusIndicator(entry, details.status);
             let nameLabel = text(el("span", entry), details.name);
+            let queueSize = el("span", entry);
             el("span", list).innerHTML = "&larr;";
-            return { seat: details.seat, nameLabel, status };
+            return { seat: details.seat, nameLabel, status, queueSize };
         }
     };
 
@@ -501,7 +516,14 @@ function renderDraftPlayers(root: HTMLElement):
     const updatePlayerDetails =
         (details: PlayerDetails) => updatePlayerListEntry(details, listState);
 
-    return [updatePlayerList, updatePlayerDetails];
+    const updateQueuedCount = (seat: string, count: number) => {
+        let entry = getPlayerListEntry(seat, listState);
+        if (entry != null && entry.queueSize !== undefined) {
+            text(entry.queueSize, ` (${count})`);
+        }
+    };
+
+    return [updatePlayerList, updatePlayerDetails, updateQueuedCount];
 }
 
 function renderCardWidthSelector(root: HTMLElement): (() => void) {
@@ -531,7 +553,7 @@ function setUpDraft(root: HTMLElement): UiState {
 
     let headerControls = el("div", header);
     classes(headerControls, "container-segment", "container-controls");
-    const [updatePlayerList, updatePlayerDetails] =
+    const [updatePlayerList, updatePlayerDetails, updateQueuedCount] =
         renderDraftPlayers(headerControls);
     updatePlayerList(statePlayerList());
 
@@ -570,6 +592,7 @@ function setUpDraft(root: HTMLElement): UiState {
         updatePlayerList,
         updatePlayerDetails,
         updatePool,
+        updateQueuedCount,
     };
 }
 
@@ -750,6 +773,14 @@ function handleMessage(message: ServerMessage) {
             break;
         case "PlayerList":
             updatePlayerList(message.value);
+            break;
+        case "QueueSize":
+            if (state.ui.phase == Phase.Draft) {
+                state.ui.updateQueuedCount(
+                    message.value.seat,
+                    message.value.count
+                );
+            }
             break;
     }
 }

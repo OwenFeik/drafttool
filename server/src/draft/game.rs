@@ -125,6 +125,14 @@ impl Draft {
         &self.pools
     }
 
+    /// Get the number of queued of packs for this player.
+    pub fn queue_size(&self, player: Uuid) -> usize {
+        self.packs_being_drafted
+            .get(&player)
+            .map(|stack| stack.len())
+            .unwrap_or(0)
+    }
+
     /// Find the player in the draft that the given player is passing to in the
     /// current round. Takes account of the the current pass direction.
     fn next_player(&self, player: Uuid) -> Option<Uuid> {
