@@ -528,7 +528,7 @@ function renderDraftPlayers(root: HTMLElement): [
 
 function renderCardWidthSelector(root: HTMLElement): (() => void) {
     let widthBox = el("span", root);
-    text(classes(el("span", widthBox), "header-el"), "Card size");
+    text(el("span", widthBox), "Card size");
     let width = el("input", widthBox) as HTMLInputElement;
     attr(width, "type", "range")
     attr(width, "min", "40");
@@ -553,6 +553,7 @@ function setUpDraft(root: HTMLElement): UiState {
 
     let headerControls = el("div", header);
     classes(headerControls, "container-segment", "container-controls");
+
     const [updatePlayerList, updatePlayerDetails, updateQueuedCount] =
         renderDraftPlayers(headerControls);
     updatePlayerList(statePlayerList());
@@ -602,9 +603,32 @@ function setUpFinished(root: HTMLElement): UiState {
     heading(header, "Draft complete");
     let pool = classes(el("div", float), "container", "simple-border");
 
-    const updateCardWidths = renderCardWidthSelector(header);
+    let headerControls = el("div", header);
+    classes(headerControls, "container-segment", "container-controls");
+
+    const updateCardWidths = renderCardWidthSelector(headerControls);
+
+    let currentPool: Card[] = [];
+
+    text(
+        el("button", classes(el("span", headerControls), "padhalf")),
+        "Copy pool list"
+    ).onclick = () => {
+        let cardCounts = new Map();
+        currentPool.forEach(card => {
+            let n = cardCounts.has(card.name) ? cardCounts.get(card.name) : 0;
+            cardCounts.set(card.name, n + 1);
+        });
+
+        let list = "";
+        cardCounts.forEach((count, card) => {
+            list += `${count} ${card}\n`
+        });
+        navigator.clipboard.writeText(list);
+    };
 
     const updatePool = (cards: Card[]) => {
+        currentPool = cards;
         pool.innerHTML = "";
         heading(pool, "Picked cards");
         renderCardList(pool, cards);

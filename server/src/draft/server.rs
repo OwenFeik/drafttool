@@ -434,8 +434,9 @@ impl DraftServer {
                 match make_packs(players.len(), config, pool.clone()) {
                     Ok(packs) => {
                         let mut draft = Draft::new(players, config.rounds, packs);
-                        self.send_packs(draft.begin());
+                        let packs = draft.begin();
                         self.phase = Phase::Draft(draft);
+                        self.send_packs(packs);
                         return true;
                     }
                     Err(e) => self.terminate(format!("Failed to create packs for draft: {e}")),
